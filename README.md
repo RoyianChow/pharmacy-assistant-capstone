@@ -62,4 +62,3 @@ See [docs/architecture.md](docs/architecture.md) for the planned workflow and [d
 8. Fix priority defects and prepare the report and demonstration.
 
 These are planned milestones, not completed features or validated clinical results.
-
