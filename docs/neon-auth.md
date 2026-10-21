@@ -17,13 +17,43 @@ Register the app's HTTPS origin with the same branch's Auth trusted domains. Loc
 
 ## Staff onboarding
 
-1. Open `/auth/sign-in` and choose **Create account**.
-2. Enter the staff member's own name, email, and password.
-3. Choose **Verify email** and enter the emailed verification code. **Send a verification code** can request another code.
+1. On a first visit, open `/auth/sign-in` and choose **Create account**. An existing account should use **Sign in** with the password its owner chose.
+2. Enter the staff member's own name, email, and password. The app does not assign a default password.
+3. Choose **Verify email** and enter the emailed verification code. **Send / resend verification code** requests another code for an existing account; recreating the account is unnecessary. Check the inbox and spam folder and use the newest code.
 4. The project owner adds the verified email to `PHARMACY_STAFF_EMAILS` on the app host and redeploys or restarts the app to apply it.
 5. Sign in and open the pharmacy workspace. Use **Sign out** to end the browser session.
 
 Account registration alone grants no pharmacy access. An empty allowlist denies every ordinary account. Never approve patient accounts merely because they registered. No staff accounts or passwords are seeded by the application.
+
+If the account password is forgotten, choose **Forgot your password?** on the sign-in form. Request a password reset code, enter that code and a new password, then sign in. This uses the managed Email OTP flow (`forgetPassword.emailOtp` and `emailOtp.resetPassword`); the application never reads existing passwords.
+
+## Verification email delivery
+
+The Neon branch must use verification codes and enable verification at sign-up. The app's staff allowlist separately requires verified ownership even if the branch allows unverified sign-in. Merely adding a mail provider API key to `.env.local` does not change Neon's managed email delivery or the deployed Vercel environment. Configure the branch email provider through Neon for a custom sender.
+
+The UI requests verification codes through `emailOtp.sendVerificationOtp` and password reset codes through `forgetPassword.emailOtp`. A successful request confirms that the Auth service accepted it; inbox delivery still depends on the configured provider. See [Neon's verification guide](https://neon.com/docs/auth/guides/email-verification) and [Email OTP guide](https://neon.com/docs/auth/guides/plugins/email-otp).
+
+Keep the branch settings aligned with the verification screen:
+
+```sh
+neon neon-auth config email-password update --enabled --email-verification-method otp --require-email-verification --send-verification-email-on-sign-up --send-verification-email-on-sign-in
+```
+
+The `auth: true` declaration in `neon.ts` enables Auth; it does not set these delivery options. If auto-send is disabled, account creation can succeed without sending a code.
+
+### Resend SMTP
+
+Configure Resend on the Neon branch's email provider using `smtp.resend.com`, port `465`, username `resend`, and the Resend API key as the SMTP password. Keep the key in the ignored local environment file and Neon's saved provider settings. The Next.js app does not need the Resend key in Vercel because Neon sends the auth emails. Never put the key in browser code or commit it.
+
+The starter sender is `onboarding@resend.dev`, which is restricted to the Resend account owner's address and supported test recipients. Before onboarding other staff, verify a sending domain in Resend and switch the Neon sender email to an address on that domain. The app's Vercel website origin and its email sending domain are separate settings. See [Resend SMTP setup](https://resend.com/docs/send-with-smtp).
+
+Check delivery without exposing a verification code:
+
+```sh
+neon neon-auth config email-provider test --recipient-email <your-staff-email>
+```
+
+Then request a verification code through the app and check its delivery status in Resend. Enter the code only in the app. An SMTP test email is not a verification code.
 
 ## Enforcement
 
