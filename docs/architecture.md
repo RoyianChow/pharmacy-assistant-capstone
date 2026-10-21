@@ -1,10 +1,16 @@
 # Planned architecture
 
-> October 21, 2026 update: patient intake at `/assessment`, the Jev adapter, submission to `/pharmacy`, SQLite dashboard storage, and reviewer notes/status history are implemented. See [patient-assessment.md](patient-assessment.md) and [pharmacy-dashboard.md](pharmacy-dashboard.md). Prescription verification and the original evaluation schema below remain planned.
+> October 21, 2026 update: patient intake at `/assessment`, the Jev adapter, submission to `/pharmacy`, local SQLite and hosted PostgreSQL dashboard storage, Neon Auth staff access, and reviewer notes/status history are implemented. See [patient-assessment.md](patient-assessment.md), [pharmacy-dashboard.md](pharmacy-dashboard.md), and [neon-auth.md](neon-auth.md). Prescription verification and the original evaluation schema below remain planned.
 
 ## Application boundary
 
-The first release is a local, single-operator demonstration. Assessment and prescription intake enter one case record, but they follow separate supported workflows. The interface presents findings and their source links for pharmacist review. It does not make or authorize a prescribing decision.
+The current application is a fictional-data demonstration that can run locally or on Vercel with PostgreSQL. Hosted case reads and review updates require a Neon Auth session and approved staff identity. Account registration alone grants no staff access; completed assessment submission remains public. It is not suitable for real patient information. The proposed assessment and prescription workflows below share a case record. The interface presents findings and their source links for pharmacist review. It does not make or authorize a prescribing decision.
+
+## Implemented dashboard storage
+
+The pharmacy API chooses PostgreSQL using `DATABASE_URL` (preferred), `NEON_DB` (alternate connection URL), or `POSTGRES_URL` (legacy alias), in that order. Local development without any of these URLs uses SQLite. On Vercel, `VERCEL=1` requires a valid database URL; missing or invalid configuration returns 503 instead of writing to a local or temporary file. PostgreSQL tables are created on first API use, requiring schema creation privileges for the database role. Existing SQLite records are not migrated automatically. See [dashboard persistence and setup](pharmacy-dashboard.md#persistence-and-runtime).
+
+The ignored `.neon` file links the workspace to its existing organization/project/branch; `neon.ts` declares Managed Better Auth. The web app requires `NEON_AUTH_BASE_URL`, `NEON_AUTH_COOKIE_SECRET`, and an approved-staff allowlist. Each protected API route independently checks the session and staff identity. Only local development without remote database or Auth settings permits the original unauthenticated SQLite demo. Production and partial configurations deny access until Auth is configured. See [staff access](neon-auth.md).
 
 ## Agent roles
 
@@ -40,4 +46,4 @@ The schema is a starting point. It is not a production medical record system and
 
 ## Scope exclusions
 
-No real patient use, autonomous prescribing, dispensing, billing, pharmacy-system integration, handwriting or image recognition, voice input, comprehensive interaction checking, public hosting, model training, prescription authenticity checks, or prescriber registration checks.
+No real patient use, autonomous prescribing, dispensing, billing, pharmacy-system integration, handwriting or image recognition, voice input, comprehensive interaction checking, model training, prescription authenticity checks, or prescriber registration checks. Staff authentication does not make the demonstration ready for patient care.

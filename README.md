@@ -9,12 +9,12 @@ An eight-week COMP 385 capstone prototype exploring how AI agents can organize m
 - Adult cases (18+) for allergic rhinitis and cold sores.
 - Typed prescriptions and up to six selected Canadian medication products.
 - Three agents with separate roles: intake, assessment, and verification.
-- A local web application using Next.js, TypeScript, and SQLite.
+- A web application using Next.js and TypeScript, with SQLite for local demos and PostgreSQL for hosted demos.
 - One pretrained model; no model training or fine-tuning.
 - One hundred synthetic cases: 60 for development and 40 held for final evaluation.
 - A human reviewer makes and records every simulated clinical decision.
 
-The first version is deliberately narrow. It will not use real patient data, scanned or handwritten prescriptions, pharmacy system connections, public hosting, or comprehensive interaction checking.
+The first version is deliberately narrow. It will not use real patient data, scanned or handwritten prescriptions, pharmacy system connections, or comprehensive interaction checking. Hosted demonstrations must also use fictional data; the staff workspace requires an approved account.
 
 ## Getting started
 
@@ -38,9 +38,9 @@ The new `/assessment` page collects adult intake through authored conversational
 
 With no API key, the complete guided flow runs in **Demo** mode. With a key, Jev selects the next question from an allowlist. Jev is a typed decision model, not a text-generating chatbot. It cannot bypass required questions or override the application's safety stops. API failures or uncertain results visibly fall back to the guided order.
 
-To connect the official TypeSafe API, copy `.env.example` to `.env.local`, set `TYPESAFE_API_KEY`, and restart the dev server. The default model is `jev-1.13.0`; change `TYPESAFE_MODEL` if your account uses another supported model. Never put the key in a client component or a `NEXT_PUBLIC_` variable. The adapter calls only `https://api.typesafe.ai/v1/systemone`. A real account call remains unverified until a key is configured.
+To connect the official TypeSafe API, create `.env.local` from `.env.example` if it does not already exist, set `TYPESAFE_API_KEY`, and restart the dev server. Preserve existing keys when adding database settings. The default model is `jev-1.13.0`; change `TYPESAFE_MODEL` if your account uses another supported model. Never put the key in a client component or a `NEXT_PUBLIC_` variable. The adapter calls only `https://api.typesafe.ai/v1/systemone`. A configured key alone does not establish provider connectivity.
 
-Consent is required before beginning. With Jev configured, entered answers are sent to TypeSafe AI for question selection. Unsubmitted chat drafts live in browser memory and clear on reload. After an eligible assessment, a separate **Send to pharmacy** action saves the fictional patient details and assessment to the local SQLite dashboard. Restarting the chat does not delete submitted cases. Contact details entered in the handoff form are not sent to Jev. Downloading a summary saves a separate file under the user's control. Provider retention and hosting logs are separate concerns; real patient use is not supported.
+Consent is required before beginning. With Jev configured, entered answers are sent to TypeSafe AI for question selection. Unsubmitted chat drafts live in browser memory and clear on reload. After an eligible assessment, a separate **Send to pharmacy** action saves the fictional patient details and assessment to the configured dashboard database. Restarting the chat does not delete submitted cases. Contact details entered in the handoff form are not sent to Jev. Downloading a summary saves a separate file under the user's control. Provider retention and hosting logs are separate concerns; real patient use is not supported.
 
 See [docs/patient-assessment.md](docs/patient-assessment.md) for the API contract, sources, boundaries, and remaining work. Run `npm.cmd test` for the screening and mocked provider checks, and `npm.cmd run build` for the production build.
 
@@ -48,9 +48,21 @@ See [docs/patient-assessment.md](docs/patient-assessment.md) for the API contrac
 
 Open [http://localhost:3000/pharmacy](http://localhost:3000/pharmacy). A submitted assessment appears in the **New** queue, with a reference number, fictional patient details, original answers, and screening next steps. Staff can search/filter cases, add a reviewer name and notes, and move cases through **New → In review → Completed**. The dashboard refreshes its queue automatically and offers manual refresh.
 
-The local database is created on first use at `data/pharmacy-dashboard.sqlite`; override its location with `PHARMACY_DATABASE_PATH` in `.env.local`. Submitted cases and review history survive reloads and server restarts. Duplicate retries return the existing receipt, and version checks prevent one review from silently overwriting another.
+With `DATABASE_URL` configured, the dashboard uses PostgreSQL; `NEON_DB` is accepted as an alternate connection URL, followed by the legacy `POSTGRES_URL` alias. Without any of these URLs, local development uses `data/pharmacy-dashboard.sqlite`; override that location with `PHARMACY_DATABASE_PATH` in `.env.local`. On Vercel (`VERCEL=1`), a missing or invalid database URL produces a 503 configuration error. The application never falls back to temporary storage there. Submitted cases and review history persist in the selected database. Duplicate retries return the existing receipt, and version checks prevent one review from silently overwriting another.
 
-This dashboard has no staff login or production access controls. Use fictional data on your local machine only. It does not book appointments, send emails/texts, issue prescriptions, or communicate with an external pharmacy system. See [docs/pharmacy-dashboard.md](docs/pharmacy-dashboard.md).
+The hosted dashboard requires Neon Auth sign-in and an approved staff identity. Verified emails must be listed in `PHARMACY_STAFF_EMAILS`; explicit user-ID approval is also supported. Creating an account alone grants no staff access. Patients can submit an assessment without registering. Only an unconfigured local development app using SQLite keeps the original demo access; production, Vercel, a remote database URL, or partial Auth settings require authentication and deny access if setup is incomplete. Use fictional data only. Sign-in does not make this educational application suitable for patient care. See [staff sign-in setup](docs/neon-auth.md) and [dashboard behavior](docs/pharmacy-dashboard.md).
+
+### Deploying the demo on Vercel
+
+The workspace is linked to the existing Neon organization/project through the ignored `.neon` file. `neon.ts` declares `auth: true`. Reuse that link rather than creating a replacement database. Use `neon status` and `neon config plan` to inspect the linked branch; `neon deploy` applies its declared services and pulls Neon environment settings. This provisions the backend services, not the Vercel website.
+
+1. Set `DATABASE_URL` in the Vercel project's **Production** environment. `NEON_DB` and `POSTGRES_URL` remain supported aliases. For a Marketplace-managed Neon database, **Storage → your database → Connect Project** can supply `DATABASE_URL` without a custom prefix.
+2. Add `NEON_AUTH_BASE_URL`, a stable random `NEON_AUTH_COOKIE_SECRET` of at least 32 characters, and the comma-separated `PHARMACY_STAFF_EMAILS` allowlist. Register the app's HTTPS origin in that Neon branch's Auth trusted domains. Keep the existing `TYPESAFE_API_KEY` configuration.
+3. Deploy the updated app, and redeploy after changing hosted environment variables. Local `.env.local` settings are not automatically copied to Vercel; preserve its existing keys when editing it.
+4. The first pharmacy API request creates the required tables. The database role must be able to create tables and indexes in its schema, then read and write them.
+5. Staff use `/auth/sign-in` to register, verify their email with its code, and sign in. Their exact verified email must also be approved in the allowlist. See [docs/neon-auth.md](docs/neon-auth.md) for setup and access rules.
+
+Existing local SQLite records are not automatically copied to PostgreSQL. A code change or successful build does not confirm the hosted database connection; check a fictional submission after deployment. For setup and troubleshooting, see [the dashboard guide](docs/pharmacy-dashboard.md#vercel-setup).
 
 ## Project map
 
@@ -65,7 +77,7 @@ See [docs/architecture.md](docs/architecture.md) for the planned workflow and [d
 
 ## Data and credentials
 
-- Only synthetic cases belong in this repository or the local demo.
+- Only synthetic cases belong in this repository or any deployed demo.
 - Do not commit `.env.local`, API keys, generated SQLite databases, or real patient information.
 - Keep model credentials on the server; never prefix secrets with `NEXT_PUBLIC_`.
 - Source links, reference versions, model name, prompt version, and reviewer decisions should be traceable in saved demo records.

@@ -1,19 +1,21 @@
 # Assessment handoff and pharmacy dashboard
 
-This is a local educational workflow using fictional cases. It is not connected to a real pharmacy. The dashboard has no staff authentication and must not be deployed for real patient information.
+This is an educational workflow using fictional cases, supported locally and as a hosted demonstration. It is not connected to a real pharmacy. The hosted dashboard requires a Neon Auth session and an approved staff identity to view cases or edit reviews. It must not be used for real patient information.
 
 ## Patient flow
 
 1. Finish the conversational assessment at `/assessment`.
 2. Eligible adult Ontario cases show a handoff form after the screening result. The patient supplies a fictional display name, chooses in-person/phone/email contact, and acknowledges that the entered information will be saved to the demo dashboard.
 3. **Send to pharmacy** posts the original answers and contact details. The server validates the entire conversation and recomputes its summary and result.
-4. The patient receives a reference number and a link to the local demo dashboard. This confirms storage, not an appointment, contact attempt, pharmacist assessment, or prescription.
+4. The patient receives a reference number and a staff-dashboard link. The hosted workspace requires staff sign-in; a patient does not need an account to complete submission. The receipt confirms storage, not an appointment, contact attempt, pharmacist assessment, or prescription.
 
 Emergency and urgent outcomes keep their direct-care instructions and cannot enter the routine pharmacy queue. Non-Ontario, under-18, nonterminal, and concern-free assessments cannot be submitted. Terminal incomplete or other-concern cases may be sent when otherwise eligible; their unresolved/outside-scope outcome remains visible to the reviewer.
 
 The submission key is unique to the conversation. Retrying the same payload returns the original receipt. Reusing a key for different information is a conflict. Contact details are collected after the AI interaction and never passed to Jev. Reloading a draft clears it; restarting or reloading after submission does not delete the stored case.
 
 ## Staff flow
+
+Open `/auth/sign-in` to sign in, create an account, or verify an email with a code. Registration alone never grants staff access. A verified email must appear in the server's `PHARMACY_STAFF_EMAILS` allowlist, or the account must have explicit user-ID approval. Both the page and protected API routes enforce access. The patient submission endpoint remains public. See [staff onboarding and configuration](neon-auth.md).
 
 `/pharmacy` shows counts for New, In review and Completed, with search and status filtering. The list returns up to 200 recent matching cases. Auto refresh updates the queue; the detail panel preserves unsaved review edits. Select a case to view patient details, original answers, the screening result and linked references, and the review history.
 
@@ -28,16 +30,57 @@ Save a required reviewer name, notes and status. Completion also requires notes.
 | GET `/api/pharmacy/cases/:id` | Case UUID | `{case}` including answer snapshot, screening result and review history |
 | PATCH `/api/pharmacy/cases/:id` | `{status, reviewerName, reviewNotes, version}` | `{case}` with incremented version and appended review event |
 
-Input errors return 400; foreign-origin writes 403; missing cases 404; changed idempotent payloads and stale review versions 409; oversized requests 413; unsupported content types 415. Errors use `{error: string}`. Responses are not cached. Same-origin checks and validation are not staff authorization.
+Input errors return 400; unauthenticated protected requests 401; foreign-origin writes or unapproved staff requests 403; missing cases 404; changed idempotent payloads and stale review versions 409; oversized requests 413; unsupported content types 415. Missing or invalid hosted database/Auth configuration and unavailable services return 503. Errors include `{error: string}`; Auth failures also include a reason. Responses are not cached. Staff authorization is checked separately from same-origin checks and input validation.
 
 ## Persistence and runtime
 
-Node.js 22.13+ is required for the built-in `node:sqlite` module without a feature flag. The development machine uses Node 22.14. No external database service is required. SQLite initializes lazily on the first request. Parameterized statements protect data values, and transactions protect case creation and review history writes.
+Node.js 22.13+ is required for local built-in `node:sqlite` support without a feature flag. The development machine uses Node 22.14. Vercel supports Node 22 and 24. Both storage adapters use parameterized queries and transactions for case creation and review history writes.
 
-`PHARMACY_DATABASE_PATH` defaults to `./data/pharmacy-dashboard.sqlite`, separate from the older proposed schema. The database and its journal/WAL companions are ignored by Git. Do not place the database in `public/`, commit it, or copy real patient records into it. This local file is not encrypted by the application. The app does not automatically purge submitted cases; resetting a chat only clears the browser draft.
+| Environment | Configuration | Storage |
+| --- | --- | --- |
+| Local or hosted | `DATABASE_URL` set to a valid PostgreSQL connection URL | PostgreSQL |
+| Local or hosted | No `DATABASE_URL`, but valid `NEON_DB` | PostgreSQL through the alternate connection URL |
+| Local or hosted | Neither `DATABASE_URL` nor `NEON_DB`, but valid `POSTGRES_URL` | PostgreSQL through the legacy variable alias |
+| Local development | None of these database URLs is set | SQLite at `PHARMACY_DATABASE_PATH`, defaulting to `./data/pharmacy-dashboard.sqlite` |
+| Vercel (`VERCEL=1`) | Database URL missing or invalid | Explicit 503 configuration error; no SQLite fallback |
+
+`DATABASE_URL` takes precedence over `NEON_DB`, followed by `POSTGRES_URL`. Each variable must contain a PostgreSQL connection URL, not a database name. Keep database credentials on the server and never use a `NEXT_PUBLIC_` name. Add local settings to the existing `.env.local` without replacing its TypeSafe API key. Editing Vercel environment settings does not modify that local file or transfer its key to Vercel; Neon CLI environment pulls update local Neon-managed settings.
+
+The PostgreSQL adapter uses `pg` with Vercel's `attachDatabasePool` helper. The first pharmacy API request initializes its tables and indexes; the configured database role needs `CREATE` on its schema, plus access to read and write the created tables and review history. An existing database role without these permissions must have the required schema provisioned by its administrator. Case creation remains idempotent, and each review update preserves its version check and history transaction.
+
+SQLite also initializes lazily. Its file is separate from the older proposed schema, and the database and journal/WAL companions are ignored by Git. Do not place a database in `public/`, commit it, or copy real patient records into it. The application does not encrypt the local SQLite file. It does not automatically purge submitted cases; resetting a chat only clears the browser draft. Existing local SQLite records are not automatically migrated to PostgreSQL. Switching database configuration selects a different store; it does not copy the previous records.
+
+## Vercel setup
+
+The current workspace is linked to the existing Neon organization/project in the ignored `.neon` file. `neon.ts` declares `auth: true`; no replacement project is required. The Neon CLI and Vercel deploy separate parts of the app: `neon deploy` provisions the declared branch services and pulls Neon environment values, while Vercel hosts the website and route handlers.
+
+1. Inspect the linked branch with `neon status` and review infrastructure changes with `neon config plan`. Apply required declared services with `neon deploy`. Keep existing `.env.local` keys when adding configuration.
+2. Set `DATABASE_URL` under **Vercel Project Settings → Environment Variables**, with **Production** selected. `NEON_DB` and `POSTGRES_URL` are accepted in that order if `DATABASE_URL` is absent. Use the provider's required TLS settings. For a database managed through [Neon in Vercel Marketplace](https://vercel.com/marketplace/neon/neon), **Storage → your database → Connect Project** can inject the pooled `DATABASE_URL` without a custom prefix.
+3. Set `NEON_AUTH_BASE_URL` from the same branch's deployed Auth service, a stable random `NEON_AUTH_COOKIE_SECRET` of at least 32 characters, and `PHARMACY_STAFF_EMAILS` with exact approved email addresses separated by commas. Register the site's HTTPS origin in the branch's Auth trusted domains. Optional explicit user-ID approval and local trusted domains are documented in [neon-auth.md](neon-auth.md).
+4. Keep the existing TypeSafe API key configuration. Database credentials, Auth settings, and the Jev key serve separate integrations. Local `.env.local` settings are not automatically copied to Vercel.
+5. Deploy the updated app, and redeploy after connecting a database or editing hosted environment variables. Existing Vercel deployments do not pick up new values.
+6. Staff register or sign in at `/auth/sign-in`, verify email ownership when using email approval, and open the workspace after their account is approved. Patient submissions require no account.
+7. After deployment, submit a fictional completed assessment and use an approved staff account to open its case. Confirm that the case remains after reloading, a review can be saved, and sign-out removes access. These are deployment checks to perform; code or build success alone does not demonstrate live database or Auth connectivity.
+
+Only local development with no remote database URL and no Auth settings permits the original unauthenticated SQLite demo. Production, Vercel, remote-database use, or partial Auth configuration disables that exception. In those environments an incomplete Auth setup denies staff access; it does not expose the dashboard publicly.
+
+### Why the earlier Vercel submission returned 503
+
+The earlier implementation attempted to initialize a SQLite file in the application's `data` directory. Vercel functions do not have permanent shared local storage suitable for this queue. File creation or opening can fail, producing the generic storage error before an external request is made. The reported request is consistent with this failure; a function error log is needed to identify its exact filesystem exception.
+
+Do not change `PHARMACY_DATABASE_PATH` to `/tmp` as a deployment fix. Temporary files may disappear and are not shared reliably across function instances. The hosted adapter requires PostgreSQL instead. If a 503 persists, check that the new deployment includes `DATABASE_URL`, that the provider is reachable, and that its role can initialize the schema. Never paste credentials or patient data into logs or error reports.
+
+### Hosting references
+
+- [Vercel: SQLite and serverless storage](https://vercel.com/kb/guide/is-sqlite-supported-in-vercel)
+- [Vercel: connection pooling with Functions](https://vercel.com/kb/guide/connection-pooling-with-functions)
+- [Neon: Vercel-managed integration and database environment variables](https://neon.com/docs/guides/vercel-managed-integration)
+- [Vercel: environment-variable changes require redeployment](https://vercel.com/docs/environment-variables/managing-environment-variables)
+- [Vercel: supported Node.js versions](https://vercel.com/docs/functions/runtimes/node-js/node-js-versions)
+- [node-postgres: transactions use the same checked-out client](https://node-postgres.com/features/transactions)
 
 ## Checks and remaining work
 
-Tests use temporary SQLite databases and exercise submission validation, idempotency, persisted records after reopening, status edits, required completion notes, conflicts, and immutable intake snapshots. These checks do not establish clinical validity or privacy compliance.
+Existing tests use temporary SQLite databases and exercise submission validation, idempotency, persisted records after reopening, status edits, required completion notes, conflicts, and immutable intake snapshots. They do not establish hosted PostgreSQL connectivity, clinical validity, or privacy compliance.
 
-Before real patient use, implement staff authentication and access controls, patient identity/consent requirements, suitable deployment and encryption, retention/deletion policies, audit access, clinician-reviewed pathways, privacy review, and an operational follow-up process. None is implied by the demo queue or a Completed status.
+Before real patient use, complete patient identity/consent requirements, a full access-control and security review, suitable deployment and encryption, retention/deletion policies, audit access, clinician-reviewed pathways, privacy review, and an operational follow-up process. Staff sign-in, the demo queue, and a Completed status do not establish clinical readiness or privacy compliance.

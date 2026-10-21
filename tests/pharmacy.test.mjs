@@ -13,32 +13,52 @@ function compile(path, replacements = {}) {
   return moduleUrl(code);
 }
 
-// Exercise actual storage, validation and routes with isolated on-disk SQLite files.
-// Only framework runtime markers are stubbed. No provider or default app database is used.
+// Exercise actual SQLite storage, validation and routes with isolated on-disk files.
+// Staff access is stubbed so these tests focus on storage; factory-selection tests
+// use a no-network PostgreSQL constructor. No provider or app database is used.
 const questions = compile("../lib/assessment/questions.ts");
 const engine = compile("../lib/assessment/engine.ts", { "./questions": questions });
 const types = compile("../lib/pharmacy/types.ts");
 const validation = compile("../lib/pharmacy/validation.ts", { "../assessment/engine": engine, "./types": types });
-const storeUrl = compile("../lib/pharmacy/store.ts", { "./validation": validation });
+const postgresStub = moduleUrl(`export class PostgresPharmacyStore {
+  constructor(connectionString) { this.connectionString = connectionString; }
+  async close() {}
+}`);
+const staffStub = moduleUrl(`export async function requireStaffApi() {
+  return globalThis.__pharmacyTestStaffDenied
+    ? Response.json({ error: "Staff sign-in required." }, { status: 401 })
+    : null;
+}`);
+const storeUrl = compile("../lib/pharmacy/store.ts", { "./validation": validation, "./postgres-store": postgresStub });
 const http = compile("../lib/pharmacy/http.ts", { "./validation": validation });
-const replacements = { "next/server": moduleUrl("export async function connection() {}"), "@/lib/pharmacy/http": http, "@/lib/pharmacy/store": storeUrl, "@/lib/pharmacy/validation": validation };
+const replacements = { "next/server": moduleUrl("export async function connection() {}"), "@/lib/pharmacy/http": http, "@/lib/pharmacy/store": storeUrl, "@/lib/pharmacy/validation": validation, "@/lib/auth/staff": staffStub };
 const routes = await import(compile("../app/api/pharmacy/cases/route.ts", replacements));
 const detail = await import(compile("../app/api/pharmacy/cases/[id]/route.ts", replacements));
-const { PharmacyStore } = await import(storeUrl);
+const { PharmacyStore, getPharmacyStore } = await import(storeUrl);
+const { PostgresPharmacyStore: FakePostgresStore } = await import(postgresStub);
+const { errorResponse } = await import(http);
 const { validateSubmission } = await import(validation);
 const { assess, nextQuestions } = await import(engine);
-const originalPath = process.env.PHARMACY_DATABASE_PATH;
+const environmentKeys = ["PHARMACY_DATABASE_PATH", "DATABASE_URL", "NEON_DB", "POSTGRES_URL", "VERCEL"];
+let originalEnvironment;
 let directory;
 
 beforeEach(() => {
+  originalEnvironment = Object.fromEntries(environmentKeys.map(key => [key, process.env[key]]));
+  for (const key of environmentKeys) delete process.env[key];
   directory = mkdtempSync(join(tmpdir(), "pharmacy-api-"));
   process.env.PHARMACY_DATABASE_PATH = join(directory, "nested", "cases.sqlite");
 });
-afterEach(() => {
+afterEach(async () => {
   for (const store of globalThis.pharmacyStores?.values() ?? []) store.close();
   globalThis.pharmacyStores?.clear();
-  if (originalPath === undefined) delete process.env.PHARMACY_DATABASE_PATH;
-  else process.env.PHARMACY_DATABASE_PATH = originalPath;
+  for (const store of globalThis.pharmacyPostgresStores?.values() ?? []) await store.close();
+  globalThis.pharmacyPostgresStores?.clear();
+  for (const key of environmentKeys) {
+    if (originalEnvironment[key] === undefined) delete process.env[key];
+    else process.env[key] = originalEnvironment[key];
+  }
+  delete globalThis.__pharmacyTestStaffDenied;
   rmSync(directory, { recursive: true, force: true });
 });
 
@@ -89,6 +109,89 @@ test("store import is lazy and a submitted case survives closing and reopening S
     assert.deepEqual(loaded.reviewHistory, []);
     assert.equal(store.list({ q: "" }).total, 1);
   } finally { store.close(); }
+});
+
+test("async storage factory selects and reuses SQLite only outside Vercel without hosted configuration", async () => {
+  assert.equal(existsSync(process.env.PHARMACY_DATABASE_PATH), false);
+  const first = await getPharmacyStore();
+  assert.ok(first instanceof PharmacyStore);
+  assert.equal(await getPharmacyStore(), first);
+  assert.equal(existsSync(process.env.PHARMACY_DATABASE_PATH), true);
+  assert.equal(globalThis.pharmacyPostgresStores?.size ?? 0, 0);
+});
+
+test("hosted storage selection honours URL precedence, whitespace and shared pools without making connections", async () => {
+  const primary = "postgresql://demo:synthetic@primary.invalid/pharmacy";
+  const neon = "postgres://demo:synthetic@neon.invalid/pharmacy";
+  const fallback = "postgresql://demo:synthetic@fallback.invalid/pharmacy";
+  process.env.VERCEL = "1";
+  process.env.DATABASE_URL = `  ${primary}  `;
+  process.env.NEON_DB = neon;
+  process.env.POSTGRES_URL = fallback;
+  const first = await getPharmacyStore();
+  assert.ok(first instanceof FakePostgresStore);
+  assert.equal(first.connectionString, primary);
+  assert.equal(await getPharmacyStore(), first);
+  process.env.DATABASE_URL = "  ";
+  assert.equal((await getPharmacyStore()).connectionString, neon);
+  delete process.env.NEON_DB;
+  assert.equal((await getPharmacyStore()).connectionString, fallback);
+  assert.equal(globalThis.pharmacyPostgresStores.size, 3);
+  assert.equal(existsSync(process.env.PHARMACY_DATABASE_PATH), false);
+});
+
+test("Vercel without a database rejects submissions with a safe 503 and never falls back to a file", async t => {
+  process.env.VERCEL = "1";
+  const logging = t.mock.method(console, "error", () => {});
+  const response = await routes.POST(request(submission()));
+  assert.equal(response.status, 503);
+  privateResponse(response);
+  assert.deepEqual(await response.json(), { error: "The pharmacy dashboard is not configured yet. Please contact the site owner." });
+  assert.deepEqual(logging.mock.calls.map(call => call.arguments), [["[pharmacy-storage]", "database_not_configured"]]);
+  assert.equal(existsSync(process.env.PHARMACY_DATABASE_PATH), false);
+  assert.equal(globalThis.pharmacyPostgresStores?.size ?? 0, 0);
+});
+
+test("invalid database URLs reject before importing a driver and never expose credentials in errors or logs", async t => {
+  const logging = t.mock.method(console, "error", () => {});
+  for (const key of ["DATABASE_URL", "NEON_DB", "POSTGRES_URL"]) {
+    process.env[key] = "https://sensitive-user:synthetic-password@private-host.invalid/db?token=synthetic-token";
+    const response = await routes.POST(request(submission()));
+    assert.equal(response.status, 503);
+    privateResponse(response);
+    assert.deepEqual(await response.json(), { error: "The pharmacy dashboard connection needs to be configured by the site owner." });
+    delete process.env[key];
+  }
+  assert.deepEqual(logging.mock.calls.map(call => call.arguments), Array.from({ length: 3 }, () => ["[pharmacy-storage]", "database_configuration_invalid"]));
+  assert.equal(existsSync(process.env.PHARMACY_DATABASE_PATH), false);
+  assert.equal(globalThis.pharmacyPostgresStores?.size ?? 0, 0);
+});
+
+test("database failures expose only allowlisted log categories and a generic response", async t => {
+  const logging = t.mock.method(console, "error", () => {});
+  for (const [code, expected] of [["28P01", "database_authentication_failed"], ["ECONNREFUSED", "database_connection_refused"], ["private-secret-code", "database_operation_failed"], ["__proto__", "database_operation_failed"]]) {
+    const failure = Object.assign(new Error("postgresql://private:synthetic-secret@host.invalid; private patient details"), { code });
+    const response = errorResponse(failure);
+    assert.equal(response.status, 503);
+    privateResponse(response);
+    assert.deepEqual(await response.json(), { error: "The pharmacy service is unavailable. Please try again." });
+    assert.deepEqual(logging.mock.calls.at(-1).arguments, ["[pharmacy-storage]", expected]);
+  }
+});
+
+test("staff access denial blocks queue reads, detail reads and updates before accessing storage", async () => {
+  globalThis.__pharmacyTestStaffDenied = true;
+  process.env.DATABASE_URL = "invalid-database-url";
+  assert.equal((await getQueue()).status, 401);
+  assert.equal((await detail.GET(request(undefined, { method: "GET" }), context(randomUUID()))).status, 401);
+  assert.equal((await detail.PATCH(request(review(), { method: "PATCH" }), context(randomUUID()))).status, 401);
+  assert.equal(existsSync(process.env.PHARMACY_DATABASE_PATH), false);
+});
+
+test("patient submission remains available without a staff session", async () => {
+  globalThis.__pharmacyTestStaffDenied = true;
+  const receipt = await create();
+  assert.match(receipt.reference, /^MA-[0-9A-F]{12}$/);
 });
 
 test("submission recomputes the result and summary and exposes only a receipt", async () => {

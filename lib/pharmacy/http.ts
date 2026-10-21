@@ -33,6 +33,19 @@ export async function readJson(request: Request): Promise<unknown> {
 }
 
 export function errorResponse(error: unknown) {
-  // Keep database errors, paths and submitted health details out of responses and logs.
+  // Log only allowlisted categories: database messages can contain credentials or patient input.
+  const categories: Record<string, string> = {
+    "28P01": "database_authentication_failed", "28000": "database_authentication_failed",
+    "3D000": "database_not_found", "42501": "database_permission_denied",
+    "42P01": "database_schema_missing", "53300": "database_connection_limit",
+    "57014": "database_query_timeout", ECONNREFUSED: "database_connection_refused",
+    ENOTFOUND: "database_host_not_found", ETIMEDOUT: "database_connection_timeout",
+    EROFS: "database_filesystem_readonly", EACCES: "database_filesystem_denied",
+    database_not_configured: "database_not_configured", database_configuration_invalid: "database_configuration_invalid",
+  };
+  if (!(error instanceof PharmacyError) || error.status >= 500) {
+    const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+    console.error("[pharmacy-storage]", typeof code === "string" && Object.hasOwn(categories, code) ? categories[code] : "database_operation_failed");
+  }
   return Response.json({ error: error instanceof PharmacyError ? error.message : "The pharmacy service is unavailable. Please try again." }, { status: error instanceof PharmacyError ? error.status : 503, headers: privateHeaders });
 }

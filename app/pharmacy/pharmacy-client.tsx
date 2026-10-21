@@ -109,13 +109,13 @@ export default function PharmacyClient() {
     <header className="ph-topbar">
       <Link href="/" className="ph-brand"><span className="ph-brand-mark">+</span><span>Pharmacy Assistant</span></Link>
       <nav aria-label="Main navigation"><Link href="/">Overview</Link><Link href="/assessment">Patient assessment</Link><Link href="/pharmacy" aria-current="page">Pharmacy workspace</Link></nav>
-      <span className="ph-local"><i/> Local demo</span>
+      <span className="ph-local"><i/> Demo workspace</span>
     </header>
     <section className="ph-intro">
       <div><p className="ph-eyebrow">ONTARIO · MINOR AILMENTS</p><h1>Pharmacy workspace<span>.</span></h1><p>Your assessment inbox. Review the details, then plan the next conversation.</p></div>
       <Link className="ph-button ph-button-light" href="/assessment">Open patient assessment <Icon name="arrow" size={16}/></Link>
     </section>
-    <aside className="ph-demo"><span className="ph-demo-label">DEMONSTRATION</span><p>Fictional records only. This local workspace has no staff sign-in and is not ready for real patient information. Screening results require a pharmacist’s assessment.</p></aside>
+    <aside className="ph-demo"><span className="ph-demo-label">DEMONSTRATION</span><p>Fictional records only. The hosted workspace is available only to approved staff. This educational demo is not for real patient information. Screening results require a pharmacist’s assessment.</p></aside>
     <section className="ph-stats" aria-label="Assessment counts">
       {(["new", "in_review", "completed"] as const).map((item, index) => <button key={item} type="button" onClick={() => setStatus(status === item ? "all" : item)} className={status === item ? "is-active" : ""} aria-pressed={status === item}>
         <span className={`ph-stat-icon ph-stat-icon-${item}`}><Icon name={index === 0 ? "inbox" : index === 1 ? "clock" : "check"} size={21}/></span>

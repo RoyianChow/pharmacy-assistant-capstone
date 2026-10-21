@@ -5,6 +5,7 @@ import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { PharmacyError } from "./validation";
 import type { ValidReview, ValidSubmission } from "./validation";
+import type { PostgresPharmacyStore } from "./postgres-store";
 import type { CaseListItem, CaseStatus, DashboardResponse, PharmacyCase, ReviewEvent, SubmissionReceipt } from "./types";
 
 type Snapshot = Pick<PharmacyCase, "patient" | "answers" | "summary" | "result" | "concern">;
@@ -132,8 +133,28 @@ export class PharmacyStore {
   }
 }
 
-const globalStore = globalThis as typeof globalThis & { pharmacyStores?: Map<string, PharmacyStore> };
-export function getPharmacyStore(): PharmacyStore {
+const globalStore = globalThis as typeof globalThis & {
+  pharmacyStores?: Map<string, PharmacyStore>;
+  pharmacyPostgresStores?: Map<string, PostgresPharmacyStore>;
+};
+export async function getPharmacyStore(): Promise<PharmacyStore | PostgresPharmacyStore> {
+  const connectionString = process.env.DATABASE_URL?.trim() || process.env.NEON_DB?.trim() || process.env.POSTGRES_URL?.trim();
+  if (connectionString) {
+    // Validate without ever including the URL, user, or password in an error.
+    let valid = false;
+    try {
+      const url = new URL(connectionString);
+      valid = ["postgres:", "postgresql:"].includes(url.protocol) && !!url.hostname;
+    } catch { /* The public error below is deliberately credential-free. */ }
+    if (!valid) throw new PharmacyError("The pharmacy dashboard connection needs to be configured by the site owner.", 503, "database_configuration_invalid");
+    const { PostgresPharmacyStore } = await import("./postgres-store");
+    const stores = globalStore.pharmacyPostgresStores ??= new Map();
+    let store = stores.get(connectionString);
+    if (!store) { store = new PostgresPharmacyStore(connectionString); stores.set(connectionString, store); }
+    return store;
+  }
+  // Vercel instances cannot share a durable local file. Never save a case to /tmp.
+  if (process.env.VERCEL) throw new PharmacyError("The pharmacy dashboard is not configured yet. Please contact the site owner.", 503, "database_not_configured");
   // This runtime-created database must not be traced into the application bundle.
   const path = resolve(/* turbopackIgnore: true */ process.env.PHARMACY_DATABASE_PATH?.trim() || "./data/pharmacy-dashboard.sqlite");
   const stores = globalStore.pharmacyStores ??= new Map();

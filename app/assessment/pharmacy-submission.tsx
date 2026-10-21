@@ -88,15 +88,15 @@ export default function PharmacySubmission({ answers, submissionKey, onSubmitted
     <section className="assessment-handoff assessment-handoff-saved" aria-labelledby="pharmacy-receipt-title">
       <p className="assessment-eyebrow">READY FOR REVIEW</p>
       <h3 id="pharmacy-receipt-title" ref={receiptHeading} tabIndex={-1}>Your assessment is in the demo dashboard.</h3>
-      <p>Saved to the local pharmacy dashboard. This is not an appointment or a prescription.</p>
+      <p>Saved to the pharmacy demo dashboard. This is not an appointment or a prescription.</p>
       <dl className="assessment-handoff-receipt">
         <div><dt>Reference</dt><dd>{saved.receipt.reference}</dd></div>
         <div><dt>Fictional patient</dt><dd>{saved.patient.displayName}</dd></div>
         <div><dt>Submitted</dt><dd><time dateTime={saved.receipt.createdAt}>{new Date(saved.receipt.createdAt).toLocaleString("en-CA", { timeZone: "America/Toronto", dateStyle: "medium", timeStyle: "short" })} (Toronto)</time></dd></div>
         <div><dt>Contact preference</dt><dd>{saved.patient.contactPreference === "in_person" ? "In person" : `${saved.patient.contactPreference === "email" ? "Email" : "Phone"}: ${saved.patient.contact}`}</dd></div>
       </dl>
-      <Link className="assessment-primary" href={`/pharmacy?case=${encodeURIComponent(saved.receipt.id)}`}>View in demo dashboard <span aria-hidden="true">↗</span></Link>
-      <p className="assessment-handoff-fineprint">No message or appointment has been sent. Your submitted case remains saved when you reload or start over.</p>
+      <Link className="assessment-primary" href={`/pharmacy?case=${encodeURIComponent(saved.receipt.id)}`}>Open staff dashboard <span aria-hidden="true">↗</span></Link>
+      <p className="assessment-handoff-fineprint">The hosted dashboard requires an approved staff account. You do not need an account to submit. No message or appointment has been sent. Your case remains saved when you reload or start over.</p>
     </section>
   );
 
@@ -104,7 +104,7 @@ export default function PharmacySubmission({ answers, submissionKey, onSubmitted
     <section className="assessment-handoff" aria-labelledby="pharmacy-handoff-title">
       <p className="assessment-eyebrow">SHARE YOUR NEXT STEP</p>
       <h3 id="pharmacy-handoff-title">Send your assessment to the pharmacy.</h3>
-      <p>Add fictional contact details so the pharmacist can review your answers in this local demo. Review the answers above before sending.</p>
+      <p>Add fictional contact details so the pharmacist can review your answers in this demo. Review the answers above before sending.</p>
       <form onSubmit={submit} aria-busy={busy}>
         <fieldset disabled={busy || frozen} className="assessment-handoff-fields">
           <legend className="assessment-visually-hidden">Fictional patient details</legend>
@@ -128,7 +128,7 @@ export default function PharmacySubmission({ answers, submissionKey, onSubmitted
         {error && <div className="assessment-error" role="alert"><strong>We couldn’t confirm your submission.</strong><p>{error}</p>{frozen && <p>Your details are held unchanged so retrying won’t create a duplicate. If you start over, any case already saved will remain in the dashboard.</p>}</div>}
         <button type="submit" className="assessment-primary" disabled={busy || (!frozen && (!consent || !displayName.trim() || (contactPreference !== "in_person" && !contact.trim())))}>{busy ? "Sending assessment…" : frozen ? "Retry same submission" : "Send to pharmacy dashboard"}<span aria-hidden="true">→</span></button>
         {busy && <p role="status">Saving your assessment and fictional details…</p>}
-        <p className="assessment-handoff-fineprint">This demo dashboard has no staff sign-in. Anyone who can access this app can view submitted cases. These contact details stay with the local pharmacy record and are not sent to Jev.</p>
+        <p className="assessment-handoff-fineprint">Only approved staff can access the hosted dashboard. Use fictional details only; this is an educational demo. These contact details are saved with the pharmacy record and are not sent to Jev.</p>
       </form>
     </section>
   );

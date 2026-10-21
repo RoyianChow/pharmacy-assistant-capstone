@@ -5,7 +5,7 @@ import type { Answer, AssessmentResult, SummaryItem } from "../assessment/types"
 import type { CaseStatus, PatientDetails } from "./types";
 
 export class PharmacyError extends Error {
-  constructor(message: string, public readonly status = 400) { super(message); }
+  constructor(message: string, public readonly status = 400, public readonly code?: string) { super(message); }
 }
 
 export type ValidSubmission = {

@@ -1,6 +1,6 @@
 # Patient conversational assessment
 
-Implemented October 21, 2026 as a local, synthetic-data capstone feature. This expands the intake catalogue beyond the original two-ailment proposal; it does not implement 28 clinical treatment algorithms.
+Implemented October 21, 2026 as a synthetic-data capstone feature. It can run locally or as a hosted demonstration. This expands the intake catalogue beyond the original two-ailment proposal; it does not implement 28 clinical treatment algorithms.
 
 ## Workflow
 
@@ -36,9 +36,9 @@ Scope checked **2026-10-21** against the [Ontario College of Pharmacists current
 
 This is an intake and scope-navigation prototype, not a diagnostic or prescribing tool. Text triggers are deliberately limited conservative pattern matches. They can miss symptoms, misinterpret negation, and over-refer. The structured warning list is not exhaustive. Unknown answers are preserved; the software cannot verify the truth or completeness of self-report. No drug interaction, allergy compatibility, dose or condition-specific eligibility check is performed. A pharmacist must review any next steps.
 
-The prototype's adult restriction is not an Ontario regulatory age restriction. Chat drafts remain in browser memory. A completion form now collects a fictional name and optional callback details, with separate consent to save the assessment to the local pharmacy dashboard. Submitted records persist in SQLite; a chat restart does not delete them. These handoff contact details are never included in Jev requests. Identity verification, appointment booking, staff authentication, and external pharmacy communication remain unimplemented. With a configured key, fictional chat answers are sent to TypeSafe; the app does not promise provider-side deletion or retention settings. See [pharmacy-dashboard.md](pharmacy-dashboard.md).
+The prototype's adult restriction is not an Ontario regulatory age restriction. Chat drafts remain in browser memory. A completion form now collects a fictional name and optional callback details, with separate consent to save the assessment to the pharmacy dashboard. Submitted records persist in the configured PostgreSQL database, or SQLite when running locally without a database URL; a chat restart does not delete them. These handoff contact details are never included in Jev requests. Patient identity verification, appointment booking, and external pharmacy communication remain unimplemented. Hosted case reads and review changes require an approved staff account through Neon Auth. Patient submission remains public, and creating an account does not grant staff access. The receipt's dashboard link is for staff; patients do not need to sign in to finish submitting. Only local development with no remote database or Auth configuration retains the original unauthenticated demo. Real patient information must not be entered. With a configured key, fictional chat answers are sent to TypeSafe; the app does not promise provider-side deletion or retention settings. See [pharmacy-dashboard.md](pharmacy-dashboard.md) and [staff access](neon-auth.md).
 
-Before real patient use: pharmacist-reviewed condition-specific pathways and sources, validated triage including free text, clinical evaluation, privacy/consent/provider review, authentication and authorization, secure records, auditable reviewer decisions, and appropriate operational controls are needed. These have not been completed here.
+Before real patient use: pharmacist-reviewed condition-specific pathways and sources, validated triage including free text, clinical evaluation, privacy/consent/provider review, a full access-control and record-security review, retention and audit policies, and appropriate operational controls are needed. Basic staff authentication and review history do not establish those requirements or clinical readiness.
 
 ## Verification
 
