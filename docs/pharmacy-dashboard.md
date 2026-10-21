@@ -79,6 +79,18 @@ Do not change `PHARMACY_DATABASE_PATH` to `/tmp` as a deployment fix. Temporary 
 - [Vercel: supported Node.js versions](https://vercel.com/docs/functions/runtimes/node-js/node-js-versions)
 - [node-postgres: transactions use the same checked-out client](https://node-postgres.com/features/transactions)
 
+## Live handoff verification — 2026-10-21
+
+A fictional seasonal-allergy assessment was completed through the production browser UI, with all 14 required answers collected in Jev's selected order. The completion form was checked across phone, in-person, and email choices, then submitted with a fictional name and email preference.
+
+- The receipt and authenticated dashboard showed the same reference, patient name, contact preference, email, concern, and screening outcome.
+- All 14 displayed answers matched their original values and labels, including a multiline medicine list and a specific medication-reaction history. Medicines and allergies appear in the highlighted cards; the other 12 answers appear below.
+- A targeted PostgreSQL read confirmed exact patient fields, raw answers/order, summary labels/values, result, and recorded consent. Reloading the dashboard preserved every displayed field.
+- Two identical live retries returned the original case. A retry with changed contact details returned 409, and the saved record remained unchanged. Unsigned queue and case reads returned 401.
+- Regression coverage now includes full round trips with Unicode and multiline text, adaptive history order, safety clarification, all contact preferences, simultaneous retries, and immutable snapshots. The full suite passed 85 tests, and the production build passed.
+
+This run used fictional information only. It did not send an email, place a call, issue a prescription, or change a staff review. These are software data-transfer checks, not clinical validation.
+
 ## Checks and remaining work
 
 Existing tests use temporary SQLite databases and exercise submission validation, idempotency, persisted records after reopening, status edits, required completion notes, conflicts, and immutable intake snapshots. They do not establish hosted PostgreSQL connectivity, clinical validity, or privacy compliance.

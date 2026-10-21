@@ -212,6 +212,72 @@ test("submission recomputes the result and summary and exposes only a receipt", 
   assert.equal(JSON.stringify(stored).includes("forged"), false);
 });
 
+test("every submitted field, labeled answer and adaptive history order survive the dashboard round trip and reopening", async () => {
+  const values = {
+    symptoms: "Sneezing after gardening.\nNo eye pain; the nose is itchy.",
+    duration: "Three days — about the same each morning.",
+    details: "Pollen and the neighbour’s cat seem to trigger it.",
+    medicines: "Vitamin D 1,000 IU daily\nSaline spray: one use yesterday",
+    allergies: "Penicillin: a rash as a child; no recent reaction.",
+    conditions: "Similar episodes each spring. No other ongoing conditions.",
+    tried: "A cool cloth helped briefly.\nNothing else tried.",
+  };
+  const intake = answers(values);
+  const historyOrder = ["allergies", "conditions", "medicines", "tried", "pregnancy"];
+  const reordered = [
+    ...intake.filter(item => !historyOrder.includes(item.questionId)),
+    ...historyOrder.map(questionId => intake.find(item => item.questionId === questionId)),
+  ];
+  const patient = { displayName: "Fictional Zoë O’Connor", contactPreference: "email", contact: "fictional.zoe+roundtrip@example.test" };
+  const input = submission({ patient, answers: reordered });
+  const receipt = await create(input);
+  const readCase = async () => (await (await detail.GET(request(undefined, { method: "GET" }), context(receipt.id))).json()).case;
+  const stored = await readCase();
+  const expectedLabels = {
+    emergency: "Emergency symptoms", age: "Age group", ontario: "Currently in Ontario",
+    concern: "Selected concern", symptoms: "Symptoms", urgent_symptoms: "Safety clarification",
+    duration: "Duration and changes", severity: "Severity", warnings: "Warning signs",
+    details: "Additional details", pregnancy: "Pregnancy / breastfeeding", medicines: "Medicines and supplements",
+    allergies: "Allergies and reactions", conditions: "Health history", tried: "Treatments tried",
+  };
+  const expectedChoices = {
+    emergency: "No", age: "18–64", ontario: "Yes", concern: "Seasonal allergies / allergic rhinitis",
+    urgent_symptoms: "No", severity: "Mild · daily activities are manageable", warnings: "No",
+    pregnancy: "No / not applicable",
+  };
+  assert.deepEqual(stored.patient, patient);
+  assert.deepEqual(stored.answers, reordered);
+  assert.equal(stored.answers.length, 15);
+  assert.deepEqual(stored.summary, reordered.map(item => ({
+    questionId: item.questionId,
+    label: expectedLabels[item.questionId],
+    value: expectedChoices[item.questionId] ?? values[item.questionId],
+  })));
+  assert.deepEqual(stored.summary.slice(-5).map(item => item.questionId), historyOrder);
+  assert.equal(stored.concern, expectedChoices.concern);
+  assert.deepEqual(stored.result, assess(reordered));
+  assert.equal(stored.result.kind, "pharmacist");
+  assert.equal(stored.outcome, "pharmacist");
+  assert.equal(stored.reference, receipt.reference);
+  assert.equal(stored.createdAt, receipt.createdAt);
+  assert.equal(stored.updatedAt, receipt.createdAt);
+  assert.equal(stored.status, "new");
+  assert.equal(stored.version, 1);
+  assert.equal(stored.reviewerName, "");
+  assert.equal(stored.reviewNotes, "");
+  assert.deepEqual(stored.reviewHistory, []);
+  for (const store of globalThis.pharmacyStores.values()) store.close();
+  globalThis.pharmacyStores.clear();
+  assert.deepEqual(await readCase(), stored);
+  const queue = await (await getQueue("?q=" + encodeURIComponent(receipt.reference))).json();
+  assert.equal(queue.cases.length, 1);
+  for (const key of ["id", "reference", "patient", "concern", "outcome", "status", "createdAt", "updatedAt", "version"]) {
+    assert.deepEqual(queue.cases[0][key], stored[key]);
+  }
+  assert.equal(Object.hasOwn(queue.cases[0], "answers"), false);
+  assert.equal(Object.hasOwn(queue.cases[0], "summary"), false);
+});
+
 test("retrying the same submission returns the existing receipt without duplicates", async () => {
   const input = submission();
   const first = await create(input);
@@ -221,6 +287,20 @@ test("retrying the same submission returns the existing receipt without duplicat
   assert.equal((await (await getQueue()).json()).total, 1);
 });
 
+test("simultaneous identical submissions create one record and return matching receipts", async () => {
+  const input = submission({ patient: { displayName: "Fictional double-click", contactPreference: "phone", contact: "+1 (416) 555-0101" } });
+  const responses = await Promise.all(Array.from({ length: 4 }, () => routes.POST(request(input))));
+  assert.deepEqual(responses.map(response => response.status).sort(), [200, 200, 200, 201]);
+  const receipts = await Promise.all(responses.map(async response => (await response.json()).receipt));
+  for (const receipt of receipts) assert.deepEqual(receipt, receipts[0]);
+  const queue = await (await getQueue()).json();
+  assert.equal(queue.total, 1);
+  assert.deepEqual(queue.counts, { new: 1, in_review: 0, completed: 0 });
+  const stored = (await (await detail.GET(request(undefined, { method: "GET" }), context(receipts[0].id))).json()).case;
+  assert.deepEqual(stored.patient, input.patient);
+  assert.deepEqual(stored.answers, input.answers);
+});
+
 test("reusing a submission key with different accepted details returns a conflict", async () => {
   const input = submission();
   await create(input);
@@ -228,6 +308,25 @@ test("reusing a submission key with different accepted details returns a conflic
   const conflict = await routes.POST(request(input));
   assert.equal(conflict.status, 409);
   privateResponse(conflict);
+  assert.equal((await (await getQueue()).json()).total, 1);
+});
+
+test("retry conflicts cannot silently overwrite contact preferences, contacts or assessment answers", async () => {
+  const input = submission({ patient: { displayName: "Fictional unchanged record", contactPreference: "email", contact: "original@example.test" } });
+  const receipt = await create(input);
+  const readCase = async () => (await (await detail.GET(request(undefined, { method: "GET" }), context(receipt.id))).json()).case;
+  const original = await readCase();
+  const variations = [
+    { ...input, patient: { ...input.patient, contact: "changed@example.test" } },
+    { ...input, patient: { ...input.patient, contactPreference: "phone", contact: "416-555-0102" } },
+    { ...input, patient: { ...input.patient, contactPreference: "in_person", contact: "" } },
+    { ...input, answers: input.answers.map(item => item.questionId === "medicines" ? { ...item, value: "Vitamin D daily" } : item) },
+  ];
+  for (const changed of variations) {
+    const response = await routes.POST(request(changed));
+    assert.equal(response.status, 409);
+    assert.deepEqual(await readCase(), original);
+  }
   assert.equal((await (await getQueue()).json()).total, 1);
 });
 
@@ -259,9 +358,14 @@ test("consent, patient details, answer ordering and submission keys are validate
 
 test("in-person preference discards stale contact details while selected email and phone persist", async () => {
   for (const [contactPreference, contact] of [["in_person", "discard@example.test"], ["email", "fictional@example.test"], ["phone", "(416) 555-0100"]]) {
-    const item = await create(submission({ patient: { displayName: "Fictional contact", contactPreference, contact } }));
+    const patient = { displayName: `Fictional ${contactPreference} contact`, contactPreference, contact };
+    const item = await create(submission({ patient }));
     const stored = (await (await detail.GET(request(undefined, { method: "GET" }), context(item.id))).json()).case;
-    assert.equal(stored.patient.contact, contactPreference === "in_person" ? "" : contact);
+    const expectedPatient = { ...patient, contact: contactPreference === "in_person" ? "" : contact };
+    assert.deepEqual(stored.patient, expectedPatient);
+    const queued = (await (await getQueue("?q=" + encodeURIComponent(item.reference))).json()).cases;
+    assert.equal(queued.length, 1);
+    assert.deepEqual(queued[0].patient, expectedPatient);
   }
 });
 
