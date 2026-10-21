@@ -91,6 +91,20 @@ A fictional seasonal-allergy assessment was completed through the production bro
 
 This run used fictional information only. It did not send an email, place a call, issue a prescription, or change a staff review. These are software data-transfer checks, not clinical validation.
 
+## Live pharmacist review verification — 2026-10-21
+
+The authenticated production dashboard was tested with fictional case `MA-0D415A9BDB9B` (`QA Demo Morgan 1021-1504`). Its status moved from New to In review, Completed, New, and Completed again. The four successful saves produced four history events and a final record version of 5.
+
+- Saving required a reviewer name, and completing a case also required notes. The Save button stayed disabled when those required fields were empty.
+- Reviewer names, multiline notes, status, queue counts, and review history reflected each successful save. A full reload preserved the final Completed status, reviewer `QA Second Reviewer`, exact multiline notes, and all four history entries.
+- Closing a case with an unsaved draft displayed a confirmation. **Keep editing** retained the draft.
+- In two open dashboard tabs, one tab saved a newer review while the other held an older version. The stale save returned 409 and retained the draft's reviewer name, selected status, and notes. **Load latest version, keep my notes** loaded the newer history while retaining the draft and enabling another save. The rejected save added no history event.
+- A targeted, read-only production PostgreSQL check confirmed that the original patient snapshot and submission timestamp were unchanged, the latest review matched exactly, all four history events matched their expected status, reviewer, notes, and version, and the latest review timestamp matched its history event.
+- The scoped pharmacy regression suite passed all 30 tests, including multiline and Unicode notes, persistence after reopening storage, status transitions and reopening, concurrent-review recovery, field limits, and protection of original patient fields.
+- After restoring the local checkout and reinstalling its locked dependencies, the full suite passed all 90 tests with zero failures, and `npm run build` completed successfully. A fresh PostgreSQL read repeated the exact review and unchanged patient-data checks successfully.
+
+This run used fictional information only. No patient contact or prescription was created. These checks verify review persistence and conflict handling; they do not establish clinical validity.
+
 ## Checks and remaining work
 
 Existing tests use temporary SQLite databases and exercise submission validation, idempotency, persisted records after reopening, status edits, required completion notes, conflicts, and immutable intake snapshots. They do not establish hosted PostgreSQL connectivity, clinical validity, or privacy compliance.

@@ -400,6 +400,127 @@ test("stale review versions cannot overwrite saved notes or append an audit even
   assert.equal(saved.reviewHistory.length, 1);
 });
 
+test("multiline review notes and named audit events survive reopening without changing patient information", async () => {
+  const receipt = await create();
+  const fetchCase = async () => (await (await detail.GET(request(undefined, { method: "GET" }), context(receipt.id))).json()).case;
+  const original = await fetchCase();
+  const reviewerName = "Demo Zoë O’Connor";
+  const reviewNotes = "Fictional review only — no treatment provided.\n\nFollow-up questions:\n\t• Confirm the reported allergy.\n\t• Discuss the next visit.\nLiteral text: <script>alert('demo')</script>";
+  const response = await detail.PATCH(request(review({ reviewerName: `  ${reviewerName}  `, reviewNotes: `\n${reviewNotes}\n` }), { method: "PATCH" }), context(receipt.id));
+  assert.equal(response.status, 200);
+  privateResponse(response);
+  const saved = (await response.json()).case;
+  assert.equal(saved.reviewerName, reviewerName);
+  assert.equal(saved.reviewNotes, reviewNotes);
+  assert.equal(saved.version, 2);
+  assert.equal(saved.status, "in_review");
+  assert.ok(Date.parse(saved.updatedAt) >= Date.parse(original.updatedAt));
+  assert.deepEqual(saved.reviewHistory, [{ status: "in_review", reviewerName, notes: reviewNotes, createdAt: saved.updatedAt }]);
+  for (const field of ["id", "reference", "patient", "answers", "summary", "result", "concern", "outcome", "createdAt"]) assert.deepEqual(saved[field], original[field]);
+  for (const store of globalThis.pharmacyStores.values()) store.close();
+  globalThis.pharmacyStores.clear();
+  assert.deepEqual(await fetchCase(), saved);
+});
+
+test("status transitions, same-status note edits and clearing optional notes keep history and queue counts consistent", async () => {
+  const receipt = await create();
+  const edits = [
+    review({ status: "in_review", reviewNotes: "First fictional review.", version: 1 }),
+    review({ status: "in_review", reviewNotes: "Amended fictional review.\nSecond line preserved.", version: 2 }),
+    review({ status: "in_review", reviewNotes: "", version: 3 }),
+    review({ status: "completed", reviewerName: "Second Demo Reviewer", reviewNotes: "Fictional review completed.", version: 4 }),
+    review({ status: "new", reviewerName: "Second Demo Reviewer", reviewNotes: "Reopened for a fictional follow-up.", version: 5 }),
+  ];
+  const expectedHistory = [];
+  for (const edit of edits) {
+    const response = await detail.PATCH(request(edit, { method: "PATCH" }), context(receipt.id));
+    assert.equal(response.status, 200);
+    const saved = (await response.json()).case;
+    expectedHistory.push({ status: edit.status, reviewerName: edit.reviewerName, notes: edit.reviewNotes, createdAt: saved.updatedAt });
+    assert.equal(saved.version, edit.version + 1);
+    assert.equal(saved.status, edit.status);
+    assert.equal(saved.reviewNotes, edit.reviewNotes);
+    assert.equal(saved.reviewerName, edit.reviewerName);
+    assert.deepEqual(saved.reviewHistory, expectedHistory);
+    for (const status of ["new", "in_review", "completed"]) {
+      const queue = await (await getQueue(`?status=${status}`)).json();
+      assert.equal(queue.total, 1);
+      assert.deepEqual(queue.counts, { new: Number(edit.status === "new"), in_review: Number(edit.status === "in_review"), completed: Number(edit.status === "completed") });
+      assert.equal(queue.cases.length, Number(edit.status === status));
+      if (queue.cases.length) {
+        assert.equal(queue.cases[0].id, receipt.id);
+        assert.equal(queue.cases[0].version, saved.version);
+        assert.equal(queue.cases[0].updatedAt, saved.updatedAt);
+      }
+    }
+  }
+});
+
+test("simultaneous reviews accept one version and a conflicted reviewer can reload then save without losing history", async () => {
+  const receipt = await create();
+  const drafts = [
+    review({ reviewerName: "Demo Reviewer A", reviewNotes: "First concurrent fictional draft." }),
+    review({ reviewerName: "Demo Reviewer B", reviewNotes: "Second concurrent fictional draft.", status: "completed" }),
+  ];
+  const responses = await Promise.all(drafts.map(draft => detail.PATCH(request(draft, { method: "PATCH" }), context(receipt.id))));
+  assert.deepEqual(responses.map(response => response.status).sort(), [200, 409]);
+  for (const response of responses) privateResponse(response);
+  const winner = responses.findIndex(response => response.status === 200);
+  const saved = (await responses[winner].json()).case;
+  assert.equal(saved.reviewNotes, drafts[winner].reviewNotes);
+  assert.equal(saved.reviewerName, drafts[winner].reviewerName);
+  assert.equal(saved.version, 2);
+  assert.equal(saved.reviewHistory.length, 1);
+  const read = await detail.GET(request(undefined, { method: "GET" }), context(receipt.id));
+  assert.deepEqual((await read.json()).case, saved);
+  const recoveredDraft = { ...drafts[1 - winner], version: saved.version };
+  const recovered = await detail.PATCH(request(recoveredDraft, { method: "PATCH" }), context(receipt.id));
+  assert.equal(recovered.status, 200);
+  const final = (await recovered.json()).case;
+  assert.equal(final.version, 3);
+  assert.equal(final.reviewNotes, recoveredDraft.reviewNotes);
+  assert.equal(final.status, recoveredDraft.status);
+  assert.deepEqual(final.reviewHistory.map(event => event.notes), [drafts[winner].reviewNotes, recoveredDraft.reviewNotes]);
+  assert.deepEqual(final.reviewHistory.map(event => event.reviewerName), [drafts[winner].reviewerName, recoveredDraft.reviewerName]);
+});
+
+test("review text limits accept the exact boundary and reject invalid changes without mutating a saved review", async () => {
+  const receipt = await create();
+  const fetchCase = async () => (await (await detail.GET(request(undefined, { method: "GET" }), context(receipt.id))).json()).case;
+  const response = await detail.PATCH(request(review({ reviewerName: "R".repeat(80), reviewNotes: "N".repeat(4000), status: "completed" }), { method: "PATCH" }), context(receipt.id));
+  assert.equal(response.status, 200);
+  const saved = (await response.json()).case;
+  assert.equal(saved.reviewNotes.length, 4000);
+  assert.equal(saved.reviewerName.length, 80);
+  for (const invalid of [
+    { reviewerName: "R".repeat(81) }, { reviewNotes: "N".repeat(4001) },
+    { reviewerName: "Name\u0000" }, { reviewNotes: "Notes\u0007" },
+    { reviewNotes: null }, { reviewerName: 123 }, { version: Number.MAX_SAFE_INTEGER + 1 },
+    { status: "completed", reviewNotes: "\n\t " },
+  ]) {
+    const rejected = await detail.PATCH(request(review({ version: saved.version, ...invalid }), { method: "PATCH" }), context(receipt.id));
+    assert.equal(rejected.status, 400);
+    privateResponse(rejected);
+    assert.deepEqual(await fetchCase(), saved);
+  }
+});
+
+test("cross-origin review updates and spoofed patient fields cannot alter the submitted snapshot", async () => {
+  const receipt = await create();
+  const fetchCase = async () => (await (await detail.GET(request(undefined, { method: "GET" }), context(receipt.id))).json()).case;
+  const original = await fetchCase();
+  for (const headers of [{ Origin: "https://elsewhere.example" }, { "Sec-Fetch-Site": "cross-site" }, { "Content-Type": "text/plain" }]) {
+    const rejected = await detail.PATCH(request(review(), { method: "PATCH", headers }), context(receipt.id));
+    assert.equal(rejected.status, headers["Content-Type"] ? 415 : 403);
+    assert.deepEqual(await fetchCase(), original);
+  }
+  const response = await detail.PATCH(request({ ...review(), patient: { displayName: "Spoofed name" }, answers: [], summary: [], result: { kind: "prescribed" }, createdAt: "changed" }, { method: "PATCH" }), context(receipt.id));
+  assert.equal(response.status, 200);
+  const saved = (await response.json()).case;
+  for (const field of ["patient", "answers", "summary", "result", "createdAt"]) assert.deepEqual(saved[field], original[field]);
+  assert.equal(saved.reviewNotes, "Review started.");
+});
+
 test("invalid statuses, unnamed reviewers, unversioned updates and empty completion notes are rejected", async () => {
   const receipt = await create();
   for (const changes of [{ status: "prescribed" }, { reviewerName: "  " }, { reviewerName: "A".repeat(81) }, { reviewNotes: "A".repeat(4001) }, { status: "completed", reviewNotes: " " }, { version: 0 }, { version: "1" }]) {
