@@ -1,5 +1,7 @@
 # Initial requirements and evaluation targets
 
+> October 21, 2026 update: `/assessment` implements patient conversational intake and scope navigation across Ontario's current minor ailment catalogue. This extends the original two-ailment intake scope, but does not implement condition-specific treatment eligibility or validate clinical accuracy. See [patient-assessment.md](patient-assessment.md).
+
 These are planned requirements. None of the targets below have been measured yet. Clinical labels and rules require suitable source review; without pharmacist feedback, results describe software behavior against student-created labels, not clinical accuracy.
 
 ## Functional requirements

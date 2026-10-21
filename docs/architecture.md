@@ -1,5 +1,7 @@
 # Planned architecture
 
+> October 21, 2026 update: patient intake at `/assessment`, the Jev adapter, submission to `/pharmacy`, SQLite dashboard storage, and reviewer notes/status history are implemented. See [patient-assessment.md](patient-assessment.md) and [pharmacy-dashboard.md](pharmacy-dashboard.md). Prescription verification and the original evaluation schema below remain planned.
+
 ## Application boundary
 
 The first release is a local, single-operator demonstration. Assessment and prescription intake enter one case record, but they follow separate supported workflows. The interface presents findings and their source links for pharmacist review. It does not make or authorize a prescribing decision.

@@ -3,8 +3,8 @@ const workflows = [
     number: "01",
     title: "Minor ailment assessment",
     description:
-      "Collect structured answers for adult allergic rhinitis and cold sore cases, then surface missing details and warning signs.",
-    status: "Planned",
+      "Chat through an adult intake, explore Ontario's minor ailment scope, and prepare a summary for a pharmacist.",
+    status: "Try the demo",
   },
   {
     number: "02",
@@ -30,6 +30,8 @@ export default function Home() {
           <span>Pharmacy Assistant</span>
         </a>
         <nav className="top-nav" aria-label="Main navigation">
+          <a href="/assessment">Patient assessment</a>
+          <a href="/pharmacy">Pharmacy dashboard</a>
           <a href="#workflows">Workflows</a>
           <a href="#scope">Project scope</a>
           <span className="local-badge"><span className="status-dot" /> Local prototype</span>
@@ -45,8 +47,8 @@ export default function Home() {
             assessments and checking typed prescriptions against a small,
             documented set of rules.
           </p>
-          <a className="primary-link" href="#workflows">
-            Explore the workflows <span aria-hidden="true">↓</span>
+          <a className="primary-link" href="/assessment">
+            Start a minor ailment assessment <span aria-hidden="true">→</span>
           </a>
           <p className="hero-footnote">Built for a local demonstration with fictional cases.</p>
         </div>
@@ -80,7 +82,7 @@ export default function Home() {
       <section className="notice" aria-label="Prototype safety notice">
         <span className="notice-icon" aria-hidden="true">i</span>
         <p>
-          <strong>Educational prototype only.</strong> No clinical checks are implemented yet.
+          <strong>Educational prototype only.</strong> Guided screening is available; clinical accuracy has not been validated.
           Use fictional records only; this application is not for patient care, prescribing,
           dispensing, or pharmacy operations.
         </p>
@@ -105,7 +107,7 @@ export default function Home() {
               </div>
               <h3>{workflow.title}</h3>
               <p>{workflow.description}</p>
-              <span className="card-footer">Fictional cases only <span aria-hidden="true">↗</span></span>
+              {workflow.number === "01" ? <a className="card-footer" href="/assessment">Open assessment <span aria-hidden="true">↗</span></a> : <span className="card-footer">Fictional cases only <span aria-hidden="true">↗</span></span>}
             </article>
           ))}
         </div>
@@ -119,7 +121,7 @@ export default function Home() {
         <div className="scope-item">
           <span className="scope-label">ASSESSMENTS</span>
           <strong>Adults 18+</strong>
-          <span>Allergic rhinitis · cold sores</span>
+          <span>Ontario minor ailment intake</span>
         </div>
         <div className="scope-item">
           <span className="scope-label">PRESCRIPTIONS</span>
