@@ -232,7 +232,7 @@ test("reusing a submission key with different accepted details returns a conflic
 });
 
 test("incomplete intake and emergency, urgent, child and outside-Ontario pathways cannot be submitted", async () => {
-  const disallowed = [[], answers().slice(0, -1), answers({ emergency: "yes" }), answers({ severity: "severe" }), answers({ symptoms: "I have eye pain" }), answers({ age: "under18" }), answers({ ontario: "no" }), answers({ ontario: "unsure" })];
+  const disallowed = [[], answers().slice(0, -1), answers({ emergency: "yes" }), answers({ severity: "severe" }), answers({ symptoms: "I have eye pain", urgent_symptoms: "yes" }), answers({ symptoms: "I have eye pain", urgent_symptoms: "yes" }).slice(0, -1), answers({ age: "under18" }), answers({ ontario: "no" }), answers({ ontario: "unsure" })];
   for (const value of disallowed) {
     const response = await routes.POST(request(submission({ answers: value })));
     assert.equal(response.status, 400);

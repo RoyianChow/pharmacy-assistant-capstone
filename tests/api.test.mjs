@@ -31,12 +31,15 @@ const engineUrl = compile("../lib/assessment/engine.ts", {
 });
 const providerUrl = moduleUrl(`
   export const calls = [];
+  export const control = { decision: undefined };
   export async function chooseNextQuestion(state, candidates) {
     calls.push({ state, candidates });
+    if (control.decision) return control.decision;
     return { questionId: candidates[0].id, mode: process.env.TYPESAFE_API_KEY ? "jev" : "demo" };
   }
 `);
-const { calls } = await import(providerUrl);
+const { calls, control } = await import(providerUrl);
+const { assess, nextQuestions } = await import(engineUrl);
 const { GET, POST } = await import(
   compile("../app/api/assessment/route.ts", {
     "@/lib/assessment/engine": engineUrl,
@@ -49,6 +52,7 @@ const originalKey = process.env.TYPESAFE_API_KEY;
 beforeEach(() => {
   delete process.env.TYPESAFE_API_KEY;
   calls.length = 0;
+  control.decision = undefined;
 });
 afterEach(() => {
   if (originalKey === undefined) delete process.env.TYPESAFE_API_KEY;
@@ -255,4 +259,67 @@ test("valid demo start and next answer retain progress and expected question ord
   assert.equal(second.progress.answered, 1);
   assert.equal(second.summary.length, 1);
   assert.equal(calls.length, 2);
+});
+
+const prefix = [
+  { questionId: "emergency", value: "no" },
+  { questionId: "age", value: "18to64" },
+  { questionId: "ontario", value: "yes" },
+  { questionId: "concern", value: "allergies" },
+];
+
+test("safety clarification never waits for Jev and retains the original wording", async () => {
+  process.env.TYPESAFE_API_KEY = "synthetic-api-test-secret";
+  const response = await POST(request({ consent: true, providerConsent: true, answers: [...prefix, { questionId: "symptoms", value: "No eye pain, just itching" }] }));
+  const body = await response.json();
+  assert.equal(body.question.id, "urgent_symptoms");
+  assert.equal(body.mode, "guided");
+  assert.equal(body.summary.at(-1).value, "No eye pain, just itching");
+  assert.equal(calls.length, 0);
+});
+
+test("punctuation-only text requests a meaningful answer without provider access", async () => {
+  const response = await POST(request({ consent: true, answers: [...prefix, { questionId: "symptoms", value: "..." }] }));
+  const body = await response.json();
+  assert.equal(body.retryAnswer, true);
+  assert.equal(body.question.id, "symptoms");
+  assert.equal(body.summary.length, 4);
+  assert.equal(body.progress.answered, 4);
+  assert.equal(calls.length, 0);
+});
+
+test("a conversational clarification repeats only the unanswered question", async () => {
+  control.decision = { questionId: "duration", mode: "jev", reply: "Please describe what you are experiencing.", retryAnswer: true };
+  const response = await POST(request({ consent: true, answers: [...prefix, { questionId: "symptoms", value: "What do you mean?" }] }));
+  const body = await response.json();
+  assert.equal(body.question.id, "symptoms");
+  assert.equal(body.retryAnswer, true);
+  assert.equal(body.progress.answered, 4);
+  assert.equal(body.summary.some(item => item.value === "What do you mean?"), false);
+  assert.equal(calls[0].state.latestQuestion.kind, "text");
+});
+
+test("Jev cannot reject a structured answer or override an emergency", async () => {
+  control.decision = { questionId: "age", mode: "jev", reply: "retry", retryAnswer: true };
+  const response = await POST(request({ consent: true, answers: [{ questionId: "emergency", value: "no" }] }));
+  assert.equal((await response.json()).retryAnswer, undefined);
+  const emergency = await POST(request({ consent: true, answers: [{ questionId: "emergency", value: "yes" }] }));
+  assert.equal((await emergency.json()).result.kind, "emergency");
+  assert.equal(calls.length, 1);
+});
+
+test("a question asked in the final answer is clarified before returning a result", async () => {
+  const values = { symptoms: "Itchy nose", duration: "Two days", severity: "mild", warnings: "no", details: "Pollen", pregnancy: "no", medicines: "None", allergies: "None", conditions: "None", tried: "Can you prescribe something?" };
+  const answers = [...prefix];
+  while (!assess(answers)) {
+    const question = nextQuestions(answers)[0];
+    answers.push({ questionId: question.id, value: values[question.id] });
+  }
+  control.decision = { questionId: "tried", mode: "jev", reply: "A pharmacist must decide whether a prescription is appropriate. What have you already tried?", retryAnswer: true };
+  const response = await POST(request({ consent: true, answers }));
+  const body = await response.json();
+  assert.equal(body.retryAnswer, true);
+  assert.equal(body.question.id, "tried");
+  assert.equal(body.result, undefined);
+  assert.equal(body.summary.length, 13);
 });

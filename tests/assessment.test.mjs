@@ -11,7 +11,7 @@ function compile(file, replacements = {}) {
   return `data:text/javascript;base64,${Buffer.from(code).toString("base64")}`;
 }
 const questionsUrl = compile("questions.ts");
-const { assess, nextQuestions, validateAnswers } = await import(compile("engine.ts", { "./questions": questionsUrl }));
+const { assess, nextQuestions, summarize, validateAnswers } = await import(compile("engine.ts", { "./questions": questionsUrl }));
 const base = { emergency: "no", age: "18to64", ontario: "yes", concern: "allergies", symptoms: "Sneezing and an itchy nose", duration: "Three days, staying the same", severity: "mild", warnings: "no", details: "Happens around pollen", pregnancy: "no", medicines: "None", allergies: "None known", conditions: "None", tried: "Nothing yet" };
 function complete(values = {}) {
   const data = { ...base, ...values };
@@ -69,4 +69,54 @@ test("Jev can reorder remaining history, but cannot skip mandatory answers", () 
   assert.equal(validateAnswers(a).length, 10);
   assert.equal(assess(a), undefined);
   assert.equal(nextQuestions(a).length, 4);
+});
+
+test("negated eye warnings ask about current symptoms instead of automatic urgent referral", () => {
+  const a = validateAnswers(complete({ concern: "pink_eye", details: "Both eyes itchy; no eye pain and no vision changes", urgent_details: "no" }));
+  assert.ok(a.some(answer => answer.questionId === "urgent_details"));
+  assert.equal(assess(a).kind, "pharmacist");
+});
+
+test("historical reactions remain history when current urgent symptoms are denied", () => {
+  const a = validateAnswers(complete({ allergies: "I had severe pain with amoxicillin years ago", urgent_allergies: "no" }));
+  assert.equal(assess(a).kind, "pharmacist");
+  assert.ok(a.some(answer => answer.questionId === "allergies" && answer.value.includes("years ago")));
+});
+
+test("a new inability to retain fluids needs confirmation after an earlier warning denial", () => {
+  const a = validateAnswers(complete({ concern: "pregnancy_nausea", details: "I cannot keep any fluids down", urgent_details: "yes" }));
+  assert.equal(a.at(-1).questionId, "urgent_details");
+  assert.equal(assess(a).kind, "urgent");
+  assert.throws(() => validateAnswers([...a, { questionId: "pregnancy", value: "pregnant" }]));
+});
+
+test("urgent clarification cannot be skipped and uncertainty remains unresolved", () => {
+  const a = complete({ symptoms: "My eye hurts and I have blurry vision", urgent_symptoms: "unsure" });
+  assert.equal(assess(validateAnswers(a)).kind, "incomplete");
+  assert.throws(() => validateAnswers([...a.slice(0, -1), { questionId: "duration", value: "Two days" }]));
+});
+
+test("fresh urgent disclosures require a new check after a previous denial", () => {
+  const a = validateAnswers(complete({ symptoms: "No eye pain", urgent_symptoms: "no", details: "Now I have blurry vision", urgent_details: "yes" }));
+  assert.equal(a.at(-1).questionId, "urgent_details");
+  assert.equal(assess(a).kind, "urgent");
+});
+
+test("natural language uncertainty is preserved for pharmacist review", () => {
+  assert.equal(assess(validateAnswers(complete({ medicines: "I am not sure which tablets I take" }))).kind, "incomplete");
+  assert.equal(assess(validateAnswers(complete({ conditions: "I don’t remember the name of my condition" }))).kind, "incomplete");
+});
+
+test("declining to answer remains incomplete and preserves the original words", () => {
+  const value = "I prefer not to answer";
+  const answers = validateAnswers(complete({ conditions: value }));
+  assert.equal(assess(answers).kind, "incomplete");
+  assert.equal(summarize(answers).find(item => item.questionId === "conditions").value, value);
+});
+
+test("wart location is structured and excluded locations are not presented as in scope", () => {
+  const excluded = validateAnswers(complete({ concern: "warts", details: "face_genitals" }));
+  assert.equal(assess(excluded).kind, "outside_scope");
+  assert.equal(assess(validateAnswers(complete({ concern: "warts", details: "hands_feet_body" }))).kind, "pharmacist");
+  assert.equal(assess(validateAnswers(complete({ concern: "warts", details: "unsure" }))).kind, "incomplete");
 });

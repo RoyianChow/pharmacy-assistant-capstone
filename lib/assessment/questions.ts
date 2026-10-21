@@ -56,9 +56,19 @@ const DETAILS: Record<string, string> = {
 };
 
 export function detailQuestion(concern?: string): Question {
+  if (concern === "warts") return {
+    id: "details", section: "Your symptoms", kind: "choice",
+    text: "Where are the suspected warts?",
+    hint: "Ontario's minor ailment pathway covers common and plantar warts, excluding the face and genitals. A pharmacist must still confirm what the spots are.",
+    options: [{ value: "hands_feet_body", label: "Hands, feet, or elsewhere on the body (not face or genitals)" }, { value: "face_genitals", label: "Face or genitals" }, { value: "unsure", label: "I'm not sure" }],
+  };
   return { id: "details", section: "Your symptoms", kind: "text", text: DETAILS[concern ?? ""] ?? "Have you had this concern before, or has a clinician identified it? Tell me anything else that might help a pharmacist understand it.", hint: "It is okay to be unsure. This information will be included in your visit summary." };
 }
 
 export function safetyQuestion(id: string): Question {
   return { id, section: "Your symptoms", kind: "choice", text: "You mentioned something that may need urgent attention. Are you having severe chest pain, difficulty breathing, loss of consciousness, or new confusion right now?", hint: "If yes, call 911. If you are unsure, get immediate medical help.", options: yesNo };
+}
+
+export function urgentQuestion(id: string): Question {
+  return { id, section: "Your symptoms", kind: "choice", text: "To clarify: are you having eye pain or new vision changes, severe pain, blood in vomit or stool, fever with back or side pain, or trouble keeping fluids down right now?", hint: "Answer about how you feel now. Past symptoms and reactions can stay in your history. If you feel seriously unwell, seek medical help now.", options: yesNo };
 }

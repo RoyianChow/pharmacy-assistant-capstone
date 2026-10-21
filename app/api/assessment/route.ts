@@ -1,5 +1,5 @@
 import { connection } from "next/server";
-import { assess, nextQuestions, summarize, validateAnswers } from "@/lib/assessment/engine";
+import { assess, getQuestion, nextQuestions, summarize, validateAnswers } from "@/lib/assessment/engine";
 import { chooseNextQuestion } from "@/lib/assessment/jev";
 import type { ChatResponse } from "@/lib/assessment/types";
 
@@ -54,11 +54,27 @@ export async function POST(request: Request) {
   } catch (error) {
     return Response.json({ error: error instanceof Error ? error.message : "Invalid assessment." }, { status: 400, headers });
   }
+  const mode = process.env.TYPESAFE_API_KEY?.trim() ? "guided" : "demo";
+  const progress = (values: typeof answers) => ({ answered: values.length, total: 14 + values.filter(a => /^(safety_|urgent_)/.test(a.questionId)).length });
+  const common = { summary: summarize(answers), progress: progress(answers) };
+  const latest = answers.at(-1);
+  const latestQuestion = latest ? getQuestion(latest.questionId, answers) : undefined;
   const result = assess(answers);
   const candidates = nextQuestions(answers);
-  const common = { summary: summarize(answers), progress: { answered: answers.length, total: 14 + answers.filter(a => a.questionId.startsWith("safety_")).length } };
-  if (result) return Response.json({ ...common, mode: process.env.TYPESAFE_API_KEY?.trim() ? "jev" : "demo", result } satisfies ChatResponse, { headers });
-  const decision = await chooseNextQuestion({ answers }, candidates);
+  // Safety always precedes conversation interpretation and never waits for AI.
+  if (result && (result.kind === "emergency" || result.kind === "urgent")) return Response.json({ ...common, mode, result } satisfies ChatResponse, { headers });
+  if (/^(safety_|urgent_)/.test(candidates[0]?.id ?? "") && !result) return Response.json({ ...common, mode, question: candidates[0] } satisfies ChatResponse, { headers });
+  const retry = (reply: string, responseMode: ChatResponse["mode"], notice?: string) => {
+    const accepted = answers.slice(0, -1);
+    return Response.json({ mode: responseMode, reply, notice, retryAnswer: true, question: latestQuestion, summary: summarize(accepted), progress: progress(accepted) } satisfies ChatResponse, { headers });
+  };
+  if (latestQuestion?.kind === "text" && latest && !/[\p{L}\p{N}]/u.test(latest.value)) return retry("Please add a few words about this question. If you don't know, you can say ‘not sure’.", mode);
+  // A final text answer still needs conversation handling (for example, a request
+  // to explain the question). The candidate is only a placeholder if intake ends.
+  if (result && latestQuestion?.kind !== "text") return Response.json({ ...common, mode, result } satisfies ChatResponse, { headers });
+  const decision = await chooseNextQuestion({ answers, latestQuestion }, candidates.length ? candidates : [latestQuestion!]);
+  if (decision.retryAnswer && latestQuestion?.kind === "text") return retry(decision.reply ?? "Could you answer this question in your own words? ‘Not sure’ is okay.", decision.mode, decision.notice);
+  if (result) return Response.json({ ...common, mode: decision.mode, reply: decision.reply, notice: decision.notice, result } satisfies ChatResponse, { headers });
   const question = candidates.find(q => q.id === decision.questionId) ?? candidates[0];
-  return Response.json({ ...common, mode: decision.mode, notice: decision.notice, question } satisfies ChatResponse, { headers });
+  return Response.json({ ...common, mode: decision.mode, notice: decision.notice, reply: decision.reply, question } satisfies ChatResponse, { headers });
 }

@@ -6,8 +6,19 @@ import type { Answer, ChatResponse, Mode, Question } from "@/lib/assessment/type
 import { canSubmitAssessment } from "@/lib/pharmacy/types";
 import PharmacySubmission, { type SavedHandoff } from "./pharmacy-submission";
 
-type Turn = { question: Question; value: string; label: string };
+type Turn = { question: Question; value: string; label: string; response: ChatResponse; reply?: string };
 const sections = ["Getting started", "Your symptoms", "Health history", "Next steps"];
+const answerLimit = 1200;
+const concernSearchTerms: Record<string, string> = {
+  acne: "pimples spots", allergies: "sneezing pollen hay fever runny nose",
+  canker_sores: "mouth ulcer", thrush: "mouth white patches", pink_eye: "red eye discharge",
+  dermatitis: "itchy skin rash", dry_eye: "gritty eyes", cramps: "period pain",
+  reflux: "heartburn", hemorrhoids: "piles", cold_sores: "lip blister",
+  bites: "itch sting mosquito", headache: "head pain", sprain: "muscle ankle pain",
+  pregnancy_nausea: "morning sickness", lice: "itchy scalp", pinworms: "itchy bottom",
+  ringworm: "fungal rash", jock_itch: "groin fungal rash", uti: "urine pee bladder burning",
+  congestion: "stuffy blocked nose", yeast: "vaginal itching",
+};
 
 function Icon({ name, size = 20 }: { name: "arrow" | "chat" | "check" | "download" | "help" | "restart"; size?: number }) {
   const paths = {
@@ -33,6 +44,8 @@ export default function AssessmentClient() {
   const [draft, setDraft] = useState("");
   const [choiceFilter, setChoiceFilter] = useState("");
   const [busy, setBusy] = useState(false);
+  const [slowResponse, setSlowResponse] = useState(false);
+  const [editingAnswer, setEditingAnswer] = useState(false);
   const [pending, setPending] = useState<Answer[] | null>(null);
   const [error, setError] = useState("");
   const [emergencyOpen, setEmergencyOpen] = useState(false);
@@ -53,7 +66,7 @@ export default function AssessmentClient() {
         if (!res.ok) throw new Error("Unable to load assessment");
         const data: unknown = await res.json();
         if (!data || typeof data !== "object" || !("mode" in data) || (data.mode !== "demo" && data.mode !== "jev")) throw new Error("Invalid configuration");
-        if (!request.signal.aborted) setConfiguredMode(data.mode);
+        if (!request.signal.aborted) { setConfiguredMode(data.mode); setConfigError(false); }
       })
       .catch(() => { if (!request.signal.aborted) setConfigError(true); })
       .finally(() => window.clearTimeout(timer));
@@ -61,6 +74,12 @@ export default function AssessmentClient() {
   }, [configAttempt]);
 
   useEffect(() => () => { controller.current?.abort(); controller.current = null; }, []);
+
+  useEffect(() => {
+    if (!busy) return;
+    const timer = window.setTimeout(() => setSlowResponse(true), 7000);
+    return () => window.clearTimeout(timer);
+  }, [busy]);
 
   useEffect(() => {
     if (transcript.current) transcript.current.scrollTop = transcript.current.scrollHeight;
@@ -79,6 +98,8 @@ export default function AssessmentClient() {
     const request = new AbortController();
     controller.current = request;
     setBusy(true);
+    setSlowResponse(false);
+    setEditingAnswer(false);
     setError("");
     setPending(nextAnswers);
     let timedOut = false;
@@ -91,10 +112,14 @@ export default function AssessmentClient() {
         signal: request.signal,
         cache: "no-store",
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(typeof data.error === "string" ? data.error : "We couldn’t continue the conversation. Please try again.");
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(typeof data?.error === "string" ? data.error : "We couldn’t continue the conversation. Please try again.");
       if (!data || (!data.question && !data.result) || !data.progress || !Array.isArray(data.summary)) throw new Error("The assessment returned an unexpected response. Please try again.");
       if (controller.current !== request) return;
+      if (data.retryAnswer === true && nextAnswers.length > 0) {
+        setAnswers(nextAnswers.slice(0, -1));
+        setHistory((previous) => previous.slice(0, -1));
+      }
       setResponse(data as ChatResponse);
       setPending(null);
       setDraft("");
@@ -115,9 +140,11 @@ export default function AssessmentClient() {
   const question = pending === null ? response?.question : undefined;
   const result = pending === null ? response?.result : undefined;
   const hasLongChoiceList = (question?.options?.length ?? 0) > 8;
-  const visibleChoices = question?.options?.filter((option) => !hasLongChoiceList || option.label.toLowerCase().includes(choiceFilter.trim().toLowerCase()));
+  const searchWords = choiceFilter.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const visibleChoices = question?.options?.filter((option) => !hasLongChoiceList || option.value === "other" || searchWords.every((word) => `${option.label} ${concernSearchTerms[option.value] ?? ""}`.toLowerCase().includes(word)));
+  const matchingConcerns = visibleChoices?.filter((option) => option.value !== "other").length ?? 0;
   const currentSection = result ? 3 : Math.max(0, sections.indexOf(response?.question?.section ?? "Getting started"));
-  const modeLabel = mode === "jev" ? "Jev enabled" : mode === "fallback" ? "Guided fallback" : configuredMode ? "Demo mode" : "Connecting";
+  const modeLabel = mode === "jev" ? "Jev assisted" : mode === "guided" ? "Guided intake" : mode === "fallback" ? "Guided mode" : configuredMode ? "Demo mode" : "Connecting";
 
   function start() {
     if (!consent || !configuredMode || controller.current) return;
@@ -127,10 +154,10 @@ export default function AssessmentClient() {
   }
 
   function submitAnswer(value: string, label = value) {
-    if (!question || controller.current || pending !== null || !value.trim()) return;
+    if (!question || !response || controller.current || pending !== null || !value.trim() || value.length > answerLimit) return;
     const nextAnswers = [...answers, { questionId: question.id, value: value.trim() }];
     setAnswers(nextAnswers);
-    setHistory([...history, { question, value: value.trim(), label: label.trim() }]);
+    setHistory([...history, { question, value: value.trim(), label: label.trim(), response, reply: response.reply }]);
     void requestAssessment(nextAnswers);
   }
 
@@ -155,20 +182,25 @@ export default function AssessmentClient() {
     setDraft("");
     setChoiceFilter("");
     setBusy(false);
+    setSlowResponse(false);
+    setEditingAnswer(false);
     setError("");
     setPending(null);
     setStarted(false);
     setConsent(false);
   }
 
-  function changePendingAnswer() {
-    if (busy || !history.length) return;
+  function changePreviousAnswer() {
+    if (controller.current || busy || !history.length || savedHandoff) return;
     const lastTurn = history[history.length - 1];
+    setResponse(lastTurn.response);
     setDraft(lastTurn.question.kind === "text" ? lastTurn.value : "");
+    setChoiceFilter("");
     setHistory(history.slice(0, -1));
     setAnswers(answers.slice(0, -1));
     setError("");
     setPending(null);
+    setEditingAnswer(true);
   }
 
   function downloadSummary() {
@@ -229,7 +261,7 @@ export default function AssessmentClient() {
       <div className="assessment-layout">
         <aside className="assessment-sidebar" aria-label="Assessment overview">
           <div className="assessment-steps-panel"><p className="assessment-eyebrow">YOUR CONVERSATION</p><ol className="assessment-steps">{sections.map((section, index) => <li key={section} className={index === currentSection ? "is-current" : index < currentSection ? "is-complete" : ""} aria-current={started && index === currentSection ? "step" : undefined}><span className="assessment-step-number">{index < currentSection ? <Icon name="check" size={15} /> : `0${index + 1}`}</span><span>{section}</span>{index === currentSection && <span className="assessment-step-dot" />}</li>)}</ol></div>
-          <div className="assessment-summary-panel"><h2>Your answers <span>{history.length.toString().padStart(2, "0")}</span></h2>{history.length ? <details className="assessment-answers" open><summary>Review what you’ve shared</summary><dl>{history.map((turn, index) => <div key={`${turn.question.id}-${index}`}><dt>{turn.question.text}</dt><dd>{turn.label}</dd></div>)}</dl></details> : <p>Your answers will appear here as we go. You can review them before taking your next step.</p>}</div>
+          <div className="assessment-summary-panel"><h2>Your answers <span>{history.length.toString().padStart(2, "0")}</span></h2>{history.length ? <details className="assessment-answers" open><summary>Review what you’ve shared</summary><dl>{history.map((turn, index) => <div key={`${turn.question.id}-${index}`}><dt>{turn.question.text}</dt><dd>{turn.label}</dd></div>)}</dl></details> : <p>Your answers will appear here as we go. Use “Change my previous answer” during the conversation to make a correction.</p>}</div>
           <div className="assessment-scope-note"><strong>Prepared for your pharmacist.</strong><p>Explore Ontario’s minor ailment categories through an adult intake conversation. A pharmacist will assess your symptoms and discuss suitable care.</p></div>
         </aside>
 
@@ -242,15 +274,18 @@ export default function AssessmentClient() {
           {!started ? <div className="assessment-welcome"><div className="assessment-welcome-symbol" aria-hidden="true"><span /><span /><span /><Icon name="chat" size={31} /></div><p className="assessment-eyebrow">LET’S BEGIN WITH YOU</p><h2>A few questions.<br />A helpful next step.</h2><p>I’ll ask about your symptoms and relevant health history, then explain whether a pharmacist assessment or another care option may be appropriate.</p><div className="assessment-welcome-facts"><span><Icon name="check" size={16} />No account needed</span><span><Icon name="check" size={16} />Unsent drafts clear on reload</span></div><div className="assessment-consent"><label><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} disabled={!configuredMode} /><span>I understand this is a demo and will use fictional details.{configuredMode === "jev" && " I understand my answers will be sent to TypeSafe AI to guide the conversation."}</span></label><p>This guide cannot diagnose a condition or issue a prescription. Please leave names, health card numbers, and contact details out of the chat. At the end, you can add a fictional name and contact preference to send your assessment to the demo dashboard. Submitted cases stay saved until demo data is cleared. The hosted dashboard is available only to approved pharmacy staff.</p></div>{!configuredMode && <div className="assessment-configuration" role="status">{configError ? <><p>We couldn’t load the assessment. Please try again.</p><button type="button" className="assessment-text-button" onClick={() => { setConfigError(false); setConfigAttempt(configAttempt + 1); }}>Try again</button></> : "Preparing your conversation…"}</div>}<button className="assessment-primary" type="button" disabled={!consent || !configuredMode} onClick={start}>Start my assessment <Icon name="arrow" size={18} /></button><p className="assessment-welcome-footnote">A short conversation, at your pace.</p></div> : <>
             <div className="assessment-transcript" ref={transcript}>
               <div className="assessment-conversation-start"><span>YOUR CONVERSATION</span><p>Thanks for checking in. Let’s find a sensible next step.</p></div>
-              {history.map((turn, index) => <div className="assessment-turn" key={`${turn.question.id}-${index}`}><div className="assessment-message assessment-message-guide"><span className="assessment-speaker">Assessment guide</span><p>{turn.question.text}</p>{turn.question.hint && <p className="assessment-message-hint">{turn.question.hint}</p>}</div><div className="assessment-message assessment-message-user"><span className="assessment-speaker">You</span><p>{turn.label}</p></div></div>)}
-              {response?.notice && <p className="assessment-mode-notice" role="status">{response.notice}</p>}
-              {question && <div className="assessment-current-message"><span className="assessment-speaker">Assessment guide <span>· {question.section}</span></span><h3 ref={activeQuestion} tabIndex={-1} aria-describedby={question.hint ? "assessment-question-hint" : undefined}>{question.text}</h3>{question.hint && <p className="assessment-question-hint" id="assessment-question-hint">{question.hint}</p>}{question.kind === "choice" && <>{hasLongChoiceList && <div className="assessment-choice-search"><label htmlFor="assessment-choice-search">Find a concern</label><input type="search" id="assessment-choice-search" placeholder="Search symptoms or conditions…" value={choiceFilter} onChange={(event) => setChoiceFilter(event.target.value)} /><p role="status">{visibleChoices?.length} options shown. Choose the closest match, or search for “other”.</p></div>}<div className={`assessment-choices${hasLongChoiceList ? " assessment-choices-scroll" : ""}`} aria-label="Choose your answer">{visibleChoices?.map((option) => <button type="button" key={option.value} onClick={() => submitAnswer(option.value, option.label)} disabled={busy}>{option.label}<Icon name="arrow" size={16} /></button>)}{visibleChoices?.length === 0 && <p className="assessment-choice-empty">No matching option. <button className="assessment-text-button" type="button" onClick={() => setChoiceFilter("")}>Show all concerns</button></p>}</div></>}</div>}
-              {busy && <div className="assessment-loading" role="status"><span className="assessment-loading-dots" aria-hidden="true"><i /><i /><i /></span><span>{history.length ? "Considering your answers…" : "Opening your conversation…"}</span></div>}
-              {error && <div className="assessment-error" role="alert"><strong>Let’s try that again.</strong><p>{error}</p><div><button className="assessment-secondary" type="button" onClick={() => pending !== null && void requestAssessment(pending)}>Retry</button>{history.length > 0 && <button type="button" className="assessment-text-button" onClick={changePendingAnswer}>Change my last answer</button>}</div></div>}
+              {history.map((turn, index) => <div className="assessment-turn" key={`${turn.question.id}-${index}`}><div className="assessment-message assessment-message-guide"><span className="assessment-speaker">Assessment guide</span>{turn.reply && <p className="assessment-guide-reply">{turn.reply}</p>}<p>{turn.question.text}</p>{turn.question.hint && <p className="assessment-message-hint">{turn.question.hint}</p>}</div><div className="assessment-message assessment-message-user"><span className="assessment-speaker">You</span><p>{turn.label}</p></div></div>)}
+              {pending === null && response?.notice && <p className="assessment-mode-notice" role="status">{response.notice}</p>}
+              {editingAnswer && question && <p className="assessment-edit-notice" role="status">You’re changing your previous answer. Earlier answers are still saved in this conversation.</p>}
+              {pending === null && response?.reply && <p className="assessment-guide-reply assessment-current-reply" role="status">{response.reply}</p>}
+              {question && <div className="assessment-current-message"><span className="assessment-speaker">Assessment guide <span>· {question.section}</span></span><h3 ref={activeQuestion} tabIndex={-1} aria-describedby={question.hint ? "assessment-question-hint" : undefined}>{question.text}</h3>{question.hint && <p className="assessment-question-hint" id="assessment-question-hint">{question.hint}</p>}{question.kind === "choice" && <>{hasLongChoiceList && <div className="assessment-choice-search"><label htmlFor="assessment-choice-search">Find a concern</label><input type="search" id="assessment-choice-search" placeholder="Search symptoms or conditions…" value={choiceFilter} onChange={(event) => setChoiceFilter(event.target.value)} /><p role="status">{matchingConcerns ? `${matchingConcerns} matching concerns. Choose the closest match.` : "No matching concern. Try another word or choose “Something else / I’m not sure”."}</p></div>}<div className={`assessment-choices${hasLongChoiceList ? " assessment-choices-scroll" : ""}`} aria-label="Choose your answer">{visibleChoices?.map((option) => <button type="button" key={option.value} onClick={() => submitAnswer(option.value, option.label)} disabled={busy}>{option.label}<Icon name="arrow" size={16} /></button>)}{visibleChoices?.length === 0 && <p className="assessment-choice-empty">No matching option. <button className="assessment-text-button" type="button" onClick={() => setChoiceFilter("")}>Show all concerns</button></p>}</div></>}</div>}
+              {question && history.length > 0 && !busy && <div className="assessment-correction"><button type="button" className="assessment-text-button" onClick={changePreviousAnswer}>Change my previous answer</button></div>}
+              {busy && <div className="assessment-loading" role="status"><span className="assessment-loading-dots" aria-hidden="true"><i /><i /><i /></span><span>{slowResponse ? "Still working on your next question. Your answers are safe here." : history.length ? "Considering your answer…" : "Opening your conversation…"}</span></div>}
+              {error && <div className="assessment-error" role="alert"><strong>Let’s try that again.</strong><p>{error}</p><div><button className="assessment-secondary" type="button" onClick={() => pending !== null && void requestAssessment(pending)}>Retry</button>{history.length > 0 && <button type="button" className="assessment-text-button" onClick={changePreviousAnswer}>Change my last answer</button>}</div></div>}
               {result && <article className={`assessment-result assessment-result-${result.kind}`}><p className="assessment-eyebrow">YOUR NEXT STEP</p><h2 ref={resultHeading} tabIndex={-1}>{result.title}</h2><p>{result.message}</p><div className="assessment-prescription"><h3>What about a prescription?</h3><p>{result.prescription}</p></div><h3>What to do next</h3><ol>{result.nextSteps.map((step, index) => <li key={index}>{step}</li>)}</ol>{result.kind === "emergency" && <a className="assessment-primary" href="tel:911">Call 911 <Icon name="arrow" size={18} /></a>}{canSubmitAssessment(answers, result) && submissionKey && <PharmacySubmission key={submissionKey} answers={answers} submissionKey={submissionKey} onSubmitted={setSavedHandoff} />}<div className="assessment-result-actions"><button className="assessment-secondary" type="button" onClick={downloadSummary}><Icon name="download" size={17} />Download my summary</button><button type="button" className="assessment-text-button" onClick={restart}>Start a new assessment</button></div><p className="assessment-result-note">Your summary contains the answers you entered and this suggested next step. It is not a diagnosis or prescription.</p><div className="assessment-sources"><h3>Learn more from official sources</h3>{result.sources.map((source) => <a key={source.url} href={source.url} target="_blank" rel="noreferrer">{source.title}<span aria-hidden="true">↗</span><span className="assessment-visually-hidden"> (opens in a new tab)</span></a>)}</div></article>}
             </div>
-            {question?.kind === "text" && <form className="assessment-composer" onSubmit={submitText}><label htmlFor="assessment-answer">Your answer</label><div><textarea id="assessment-answer" rows={2} maxLength={1000} value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Type your answer here…" aria-describedby="assessment-input-note" disabled={busy} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); submitAnswer(draft); } }} /><button type="submit" disabled={!draft.trim() || busy} aria-label="Send your answer"><Icon name="arrow" size={21} /></button></div><p id="assessment-input-note">Fictional details only. Enter to send; Shift + Enter for a new line.<span>{draft.length}/1,000</span></p></form>}
-            <footer className="assessment-chat-footer"><span>{result ? "Conversation complete" : `${answers.length} ${answers.length === 1 ? "answer" : "answers"} shared`}</span><span>For demonstration only</span></footer>
+            {question?.kind === "text" && <form className="assessment-composer" onSubmit={submitText}><label htmlFor="assessment-answer">{response?.retryAnswer ? "Try answering this question again" : "Your answer"}</label><div><textarea id="assessment-answer" rows={2} value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Type your answer here…" aria-describedby="assessment-input-note" aria-invalid={draft.length > answerLimit || undefined} disabled={busy} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); submitAnswer(draft); } }} /><button type="submit" disabled={!draft.trim() || busy || draft.length > answerLimit} aria-label="Send your answer"><span>Send</span><Icon name="arrow" size={18} /></button></div><p id="assessment-input-note" className={draft.length > answerLimit ? "assessment-input-too-long" : undefined}>{draft.length > answerLimit ? `Please remove ${draft.length - answerLimit} character${draft.length - answerLimit === 1 ? "" : "s"} before sending. Your full draft is still here.` : "Fictional details only. Enter to send; Shift + Enter for a new line."}<span>{draft.length.toLocaleString("en-CA")}/{answerLimit.toLocaleString("en-CA")}</span></p></form>}
+            <footer className="assessment-chat-footer"><span>{result ? "Conversation complete" : `${answers.length} ${answers.length === 1 ? "answer" : "answers"} shared${response?.progress.total ? ` · about ${Math.max(0, response.progress.total - answers.length)} to go` : ""}`}</span><span>For demonstration only</span></footer>
           </>}
         </section>
       </div>

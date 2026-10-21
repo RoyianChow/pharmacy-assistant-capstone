@@ -1,4 +1,4 @@
-export type Mode = "demo" | "jev" | "fallback";
+export type Mode = "demo" | "guided" | "jev" | "fallback";
 export type Section = "Getting started" | "Your symptoms" | "Health history";
 export type Question = {
   id: string;
@@ -21,6 +21,8 @@ export type AssessmentResult = {
 export type ChatResponse = {
   mode: Mode;
   notice?: string;
+  reply?: string;
+  retryAnswer?: boolean;
   question?: Question;
   result?: AssessmentResult;
   progress: { answered: number; total: number };

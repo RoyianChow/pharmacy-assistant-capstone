@@ -83,7 +83,9 @@ test("successful request keeps credentials server-side and uses the official typ
     assert.ok(init.signal instanceof AbortSignal);
     const body = JSON.parse(init.body);
     assert.equal(body.model, "jev-1.14.0");
-    assert.deepEqual(body.state, state);
+    assert.deepEqual(body.state.answers, state.answers);
+    assert.deepEqual(body.state.latestAnswer, state.answers.at(-1));
+    assert.deepEqual(body.state.candidateOrder, ["duration", "history"]);
     assert.equal(body.questions.next_question.type, "choice");
     assert.deepEqual(body.questions.next_question.criteria, {
       duration: candidates[0].text,
@@ -100,24 +102,18 @@ test("successful request keeps credentials server-side and uses the official typ
   });
 });
 
-test("a single candidate is only labeled Jev after a real successful provider call", async (t) => {
-  const fetch = t.mock.method(globalThis, "fetch", async () =>
-    Response.json(
-      payload({
-        choice: "duration",
-        confidence: 1,
-        probabilities: { duration: 1 },
-      }),
-    ),
-  );
+test("a single guided step does not call Jev or claim a model decision", async (t) => {
+  const fetch = t.mock.method(globalThis, "fetch", () => {
+    throw new Error("No provider call should occur");
+  });
   assert.deepEqual(await chooseNextQuestion(state, candidates.slice(0, 1)), {
     questionId: "duration",
-    mode: "jev",
+    mode: "guided",
   });
-  assert.equal(fetch.mock.callCount(), 1);
+  assert.equal(fetch.mock.callCount(), 0);
 });
 
-test("uncertain choices fall back without presenting a clinical conclusion", async (t) => {
+test("uncertainty between approved required questions is not a provider outage", async (t) => {
   t.mock.method(globalThis, "fetch", async () =>
     Response.json(
       payload({
@@ -127,9 +123,9 @@ test("uncertain choices fall back without presenting a clinical conclusion", asy
     ),
   );
   const result = await chooseNextQuestion(state, candidates);
-  assert.equal(result.mode, "fallback");
-  assert.equal(result.questionId, "duration");
-  assert.match(result.notice, /guided questions/);
+  assert.equal(result.mode, "jev");
+  assert.equal(result.questionId, "history");
+  assert.equal(result.notice, undefined);
 });
 
 test("validator rejects unexpected choices and invalid probability distributions", () => {
@@ -147,6 +143,7 @@ test("validator rejects unexpected choices and invalid probability distributions
     payload({ probabilities: { history: 0.1, duration: 0.9 } }),
     { ...payload(), usage: { input_tokens: -1, output_tokens: 10 } },
     { ...payload(), model: "" },
+    { ...payload(), model: "   " },
     { answers: payload().answers },
     null,
   ];
@@ -155,6 +152,117 @@ test("validator rejects unexpected choices and invalid probability distributions
     questionId: "history",
     confidence: 0.8,
   });
+});
+
+const intents = ["answered", "uncertain", "clarification_request", "treatment_question", "unrelated"];
+const textState = {
+  answers: [{ questionId: "medicines", value: "What do you mean by supplements?" }],
+  latestQuestion: {
+    id: "medicines", kind: "text", text: "What medicines or supplements are you taking?",
+    hint: "Include health products, or say none or not sure.",
+  },
+};
+function conversationalPayload(intent, confidence = 0.95) {
+  return {
+    ...payload(),
+    answers: {
+      ...payload().answers,
+      response_intent: {
+        type: "choice", choice: intent, confidence,
+        probabilities: Object.fromEntries(intents.map(id => [id, id === intent ? 1 : 0])),
+      },
+    },
+  };
+}
+
+test("a request to explain the current question gets an authored clarification and retry", async (t) => {
+  t.mock.method(globalThis, "fetch", async (_url, init) => {
+    const body = JSON.parse(init.body);
+    assert.deepEqual(body.state.latestQuestion, textState.latestQuestion);
+    assert.equal(body.questions.response_intent.type, "choice");
+    assert.match(body.questions.response_intent.instructions, /ONLY latestAnswer/);
+    assert.match(body.questions.response_intent.instructions, /any usable answer/);
+    return Response.json(conversationalPayload("clarification_request"));
+  });
+  const selected = await chooseNextQuestion(textState, candidates);
+  assert.equal(selected.retryAnswer, true);
+  assert.match(selected.reply, /vitamins, supplements/);
+  assert.match(selected.reply, /not sure/);
+});
+
+test("treatment questions receive a pharmacist boundary without invented advice", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => Response.json(conversationalPayload("treatment_question")));
+  const selected = await chooseNextQuestion({ ...textState, answers: [{questionId:"medicines",value:"Which antibiotic do I need?"}] }, candidates);
+  assert.equal(selected.retryAnswer, true);
+  assert.match(selected.reply, /pharmacist must assess/i);
+  assert.equal(selected.reply.includes("antibiotic"), false);
+});
+
+test("unknown answers remain accepted and are never treated as a clarification request", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => Response.json(conversationalPayload("uncertain")));
+  const selected = await chooseNextQuestion({ ...textState, answers: [{questionId:"medicines",value:"not sure"}] }, candidates);
+  assert.equal(selected.retryAnswer, false);
+  assert.match(selected.reply, /okay to be unsure/);
+});
+
+test("offered short answers cannot be rejected by a mistaken confident model", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => Response.json(conversationalPayload("unrelated", 1)));
+  for (const value of ["not sure", "n/a", "prefer not to answer", "none", "none known", "nothing yet"]) {
+    const selected = await chooseNextQuestion({ ...textState, answers: [{questionId:"medicines",value}] }, candidates);
+    assert.equal(selected.retryAnswer, false, value);
+    assert.equal(selected.reply.includes("Please answer"),false,value);
+  }
+});
+
+test("relevant replies are accepted and raw model text is never displayed", async (t) => {
+  const response = conversationalPayload("answered");
+  response.answers.response_intent.text = "Take a synthetic medicine at 50 mg";
+  t.mock.method(globalThis, "fetch", async () => Response.json(response));
+  const selected = await chooseNextQuestion(textState, candidates);
+  assert.equal(selected.retryAnswer, false);
+  assert.equal(selected.reply.includes("50 mg"), false);
+});
+
+test("uncertain intent never traps the person in a repeated question", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => Response.json(conversationalPayload("unrelated", 0.74)));
+  const selected = await chooseNextQuestion(textState, candidates);
+  assert.equal(selected.retryAnswer, undefined);
+  assert.equal(selected.reply, undefined);
+  assert.equal(selected.mode, "jev");
+});
+
+test("invalid optional intent does not discard a valid required question selection", async (t) => {
+  const response = conversationalPayload("prescribe");
+  t.mock.method(globalThis, "fetch", async () => Response.json(response));
+  const selected = await chooseNextQuestion(textState, candidates);
+  assert.equal(selected.questionId, "history");
+  assert.equal(selected.retryAnswer, undefined);
+});
+
+test("text on a single-candidate step is still interpreted", async (t) => {
+  const response = conversationalPayload("clarification_request");
+  response.answers.next_question = payload({choice:"duration",confidence:1,probabilities:{duration:1}}).answers.next_question;
+  const fetch = t.mock.method(globalThis, "fetch", async () => Response.json(response));
+  const selected = await chooseNextQuestion(textState, candidates.slice(0,1));
+  assert.equal(selected.retryAnswer, true);
+  assert.equal(fetch.mock.callCount(), 1);
+});
+
+test("safety confirmations never wait for an AI request", async (t) => {
+  const fetch = t.mock.method(globalThis, "fetch", () => { throw new Error("No provider call should occur"); });
+  for (const id of ["safety_symptoms", "urgent_details"]) {
+    assert.deepEqual(await chooseNextQuestion(textState, [{id,text:"Safety confirmation"}]), {questionId:id,mode:"guided"});
+  }
+  assert.equal(fetch.mock.callCount(),0);
+});
+
+test("an older text answer is not interpreted as the newest reply", async (t) => {
+  t.mock.method(globalThis, "fetch", async (_url,init) => {
+    assert.equal("response_intent" in JSON.parse(init.body).questions,false);
+    return Response.json(payload());
+  });
+  const selected=await chooseNextQuestion({...textState,answers:[...textState.answers,{questionId:"pregnancy",value:"no"}]},candidates);
+  assert.equal(selected.retryAnswer,undefined);
 });
 
 test("an invalid provider answer cannot select an unapproved question", async (t) => {
