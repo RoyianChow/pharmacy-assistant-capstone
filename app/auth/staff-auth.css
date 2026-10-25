@@ -1,8 +1,6 @@
 .staff-auth { width: min(1120px, calc(100% - 48px)); margin: 0 auto; color: #254c43; }
 .staff-auth-header { min-height: 84px; display: flex; align-items: center; justify-content: space-between; gap: 24px; border-bottom: 1px solid #dce6e0; }
 .staff-auth-header > a:last-child { color: #58746b; font-size: 12px; }
-.staff-auth-brand { display: inline-flex; align-items: center; gap: 11px; font-size: 14px; font-weight: 700; }
-.staff-auth-brand > span { width: 35px; height: 35px; display: grid; place-items: center; color: white; background: #174e46; border-radius: 10px; font: 22px Georgia, serif; }
 .staff-auth-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 80px; align-items: start; padding: 74px 0 80px; }
 .staff-auth-intro { padding-top: 42px; }
 .staff-auth-eyebrow { font-size: 10px; font-weight: 700; letter-spacing: 1.8px; color: #698779; margin: 0 0 15px; }
@@ -38,4 +36,4 @@
 .staff-session-control button { border: 1px solid #cfddcc; border-radius: 5px; background: #fff; color: #496b4a; padding: 7px 10px; font: 11px Arial, sans-serif; cursor: pointer; }
 .staff-session-control > [role="alert"] { flex-basis: 100%; color: #9b5141; }
 @media (max-width: 800px) { .staff-auth-layout { gap: 35px; grid-template-columns: .85fr 1fr; } .staff-auth-card { padding: 25px; } }
-@media (max-width: 650px) { .staff-auth { width: calc(100% - 32px); } .staff-auth-header { min-height: 74px; gap: 12px; } .staff-auth-brand { font-size: 12px; } .staff-auth-header > a:last-child { font-size: 10px; } .staff-auth-layout { display: flex; flex-direction: column; padding-top: 30px; gap: 28px; } .staff-auth-intro { padding: 0; } .staff-auth-intro h1 { font-size: 38px; } .staff-auth-intro > p { margin-bottom: 0; } .staff-auth-info { display: none; } .staff-auth-card { width: 100%; } .staff-auth-intro .staff-auth-demo { margin-top: 12px; } }
+@media (max-width: 650px) { .staff-auth { width: calc(100% - 32px); } .staff-auth-header { min-height: 74px; gap: 12px; } .staff-auth-header > a:last-child { font-size: 10px; } .staff-auth-layout { display: flex; flex-direction: column; padding-top: 30px; gap: 28px; } .staff-auth-intro { padding: 0; } .staff-auth-intro h1 { font-size: 38px; } .staff-auth-intro > p { margin-bottom: 0; } .staff-auth-info { display: none; } .staff-auth-card { width: 100%; } .staff-auth-intro .staff-auth-demo { margin-top: 12px; } }

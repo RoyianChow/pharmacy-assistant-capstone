@@ -4,17 +4,10 @@ import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Answer } from "@/lib/assessment/types";
 import type { PatientDetails, SubmissionReceipt } from "@/lib/pharmacy/types";
+import { readSubmissionResponse } from "@/lib/pharmacy/submission-response";
 
 export type SavedHandoff = { receipt: SubmissionReceipt; patient: PatientDetails };
 type SubmissionPayload = { submissionKey: string; patient: PatientDetails; answers: Answer[]; consentToShare: true };
-
-function isReceipt(value: unknown): value is SubmissionReceipt {
-  if (!value || typeof value !== "object") return false;
-  const receipt = value as Partial<SubmissionReceipt>;
-  return typeof receipt.id === "string" && typeof receipt.reference === "string" &&
-    typeof receipt.createdAt === "string" && Number.isFinite(Date.parse(receipt.createdAt)) &&
-    ["new", "in_review", "completed"].includes(receipt.status ?? "");
-}
 
 export default function PharmacySubmission({ answers, submissionKey, onSubmitted }: {
   answers: Answer[];
@@ -63,14 +56,14 @@ export default function PharmacySubmission({ answers, submissionKey, onSubmitted
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload.current), signal: attempt.signal, cache: "no-store",
       });
-      const data = await res.json();
+      const data = await readSubmissionResponse(res);
       if (request.current !== attempt) return;
-      if (!res.ok) {
+      if (!data.ok) {
         // Validation failures occur before a record is saved, so correcting the form is safe.
-        if (res.status === 400 || res.status === 422) { payload.current = null; setFrozen(false); }
-        throw new Error(typeof data.error === "string" ? data.error : "We couldn’t confirm that your assessment was saved.");
+        if (data.canCorrect) { payload.current = null; setFrozen(false); }
+        setError(data.message);
+        return;
       }
-      if (!isReceipt(data.receipt)) throw new Error("We couldn’t confirm the pharmacy reference. Please retry to retrieve it.");
       const handoff = { receipt: data.receipt, patient: payload.current!.patient };
       sent.current = true;
       setSaved(handoff);

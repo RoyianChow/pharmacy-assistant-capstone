@@ -52,7 +52,6 @@ a {
   border-bottom: 1px solid var(--line);
 }
 
-.brand,
 .top-nav,
 .local-badge,
 .primary-link,
@@ -60,26 +59,6 @@ a {
 .card-footer {
   display: flex;
   align-items: center;
-}
-
-.brand {
-  gap: 11px;
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
-
-.brand-mark {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-  background: var(--deep-teal);
-  color: white;
-  font-family: Georgia, serif;
-  font-size: 17px;
-  font-weight: 700;
 }
 
 .top-nav {

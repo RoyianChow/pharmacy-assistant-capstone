@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import SiteBrand from "../../components/site-brand";
 import { Suspense } from "react";
 import { connection } from "next/server";
 import { hasAuthConfiguration, isLocalAuthDemo } from "@/lib/auth/config";
@@ -18,7 +19,7 @@ export default function SignInPage({ searchParams }: { searchParams: Promise<{ r
   return (
     <main className="staff-auth">
       <header className="staff-auth-header">
-        <Link href="/" className="staff-auth-brand"><span aria-hidden="true">+</span> Pharmacy Assistant</Link>
+        <SiteBrand />
         <Link href="/assessment">Patient assessment <span aria-hidden="true">↗</span></Link>
       </header>
       <div className="staff-auth-layout">

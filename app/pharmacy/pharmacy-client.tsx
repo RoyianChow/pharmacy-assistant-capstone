@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import SiteBrand from "../components/site-brand";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { AssessmentResult, SummaryItem } from "@/lib/assessment/types";
 import type { CaseListItem, CaseStatus, DashboardResponse, PharmacyCase } from "@/lib/pharmacy/types";
@@ -107,7 +108,7 @@ export default function PharmacyClient() {
 
   return <main className="ph-page">
     <header className="ph-topbar">
-      <Link href="/" className="ph-brand"><span className="ph-brand-mark">+</span><span>Pharmacy Assistant</span></Link>
+      <SiteBrand />
       <nav aria-label="Main navigation"><Link href="/">Overview</Link><Link href="/assessment">Patient assessment</Link><Link href="/pharmacy" aria-current="page">Pharmacy workspace</Link></nav>
       <span className="ph-local"><i/> Demo workspace</span>
     </header>

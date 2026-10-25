@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import SiteBrand from "../components/site-brand";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import type { Answer, ChatResponse, Mode, Question } from "@/lib/assessment/types";
 import { canSubmitAssessment } from "@/lib/pharmacy/types";
@@ -247,7 +248,7 @@ export default function AssessmentClient() {
     <main className="assessment-page">
       <a className="assessment-skip" href="#assessment-conversation">Skip to assessment</a>
       <header className="assessment-topbar">
-        <Link className="assessment-brand" href="/" aria-label="Pharmacy Assistant home"><span className="assessment-brand-mark">Rx</span><span>Pharmacy Assistant</span></Link>
+        <SiteBrand />
         <nav className="assessment-nav" aria-label="Main navigation"><Link href="/">Home</Link><Link href="/assessment" aria-current="page">Assessment</Link><Link href="/pharmacy">Pharmacy dashboard</Link><span className="assessment-province"><span /> Ontario</span></nav>
       </header>
 

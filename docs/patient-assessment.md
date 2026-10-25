@@ -47,3 +47,14 @@ Before real patient use: pharmacist-reviewed condition-specific pathways and sou
 With the app running, `node scripts/verify-jev-conversation.mjs` is an opt-in live check using fictional inputs. Set `QA_BASE_URL` for the desired app (default `http://localhost:3005`). It exercises the assessment endpoint, including real Jev calls when configured, without creating pharmacy cases. Do not use real patient details for this check.
 
 Verification recorded on 2026-10-21: all 82 automated tests passed, `npm.cmd run build` completed successfully, and the local live check passed all 26 HTTP requests (12 validated Jev responses, 14 guided responses, zero fallbacks). Browser checks confirmed clarification retries, previous-answer correction, preserved over-limit drafts, and current-symptom clarification. Only fictional assessment inputs were used; the live conversation check did not write pharmacy cases or accounts.
+
+### Follow-up verification — 2026-10-25
+
+- The home, assessment, staff sign-in, and dashboard headers now render one shared `SiteBrand` component. Its Rx mark and wordmark use one stylesheet loaded by the root layout. Browser comparisons confirmed matching rendered logo styles through home-to-login navigation and on the assessment page.
+- Submission responses are interpreted safely even when a gateway returns HTML, an empty body, malformed JSON, or a failed response stream. Definite 400/422 validation rejections unlock the details for correction; uncertain failures retain the original payload and submission key. Technical parser messages and upstream failure details are not displayed.
+- All 99 automated tests passed, along with lint and the production build. New tests cover shared-brand rendering and stylesheet loading, and submission response handling.
+- The live Jev check passed 26 HTTP requests: 11 validated Jev responses, 15 guided responses, and no fallbacks. It covered all 14 required answers, clarification and treatment questions, unknown answers, warning confirmations, and out-of-scope results.
+- Browser checks covered consent, concern search (including no matches), a retained 1,201-character draft with Send disabled, clarification without adding an answer, previous-answer correction, and keeping a draft after cancelling restart.
+- A complete fictional assessment was submitted as `QA Demo Casey 1025`, reference `MA-D14D8C6B86A1`. A rejected phone number left the fields editable; switching to in-person contact permitted submission. All 14 displayed answers matched the hosted dashboard exactly, and the downloaded summary contained the corrected answers, fictional name, and receipt while excluding the rejected clarification question.
+
+These checks used fictional data. The submitted test case remains available in the demo dashboard.

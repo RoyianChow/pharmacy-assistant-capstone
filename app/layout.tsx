@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./components/site-brand.css";
 
 export const metadata: Metadata = {
   title: "Pharmacy Assistant | COMP 385 Capstone",

@@ -1,3 +1,5 @@
+import SiteBrand from "./components/site-brand";
+
 const workflows = [
   {
     number: "01",
@@ -25,10 +27,7 @@ export default function Home() {
   return (
     <main className="workspace">
       <header className="topbar">
-        <a className="brand" href="#top" aria-label="Pharmacy Assistant home">
-          <span className="brand-mark" aria-hidden="true">Rx</span>
-          <span>Pharmacy Assistant</span>
-        </a>
+        <SiteBrand />
         <nav className="top-nav" aria-label="Main navigation">
           <a href="/assessment">Patient assessment</a>
           <a href="/pharmacy">Pharmacy dashboard</a>
