@@ -5,7 +5,7 @@ import { Pool } from "pg";
 import type { PoolClient } from "pg";
 import { PharmacyError } from "./validation";
 import type { ValidReview, ValidSubmission } from "./validation";
-import type { CaseListItem, CaseStatus, DashboardResponse, PharmacyCase, ReviewEvent, SubmissionReceipt } from "./types";
+import type { CaseFilters, CaseListItem, CaseStatus, DashboardResponse, PharmacyCase, ReviewEvent, SubmissionReceipt } from "./types";
 
 type Snapshot = Pick<PharmacyCase, "patient" | "answers" | "summary" | "result" | "concern">;
 type CaseRow = {
@@ -168,7 +168,7 @@ export class PostgresPharmacyStore {
     });
   }
 
-  async list(filters: { q: string; status?: CaseStatus }): Promise<DashboardResponse> {
+  async list(filters: CaseFilters): Promise<DashboardResponse> {
     await this.ensureSchema();
     return this.transaction(async (client) => {
       const counts = { new: 0, in_review: 0, completed: 0 };
@@ -182,16 +182,27 @@ export class PostgresPharmacyStore {
         values.push(filters.status);
         conditions.push(`status = $${values.length}`);
       }
+      if (filters.outcome) {
+        values.push(filters.outcome);
+        conditions.push(`snapshot_json::jsonb -> 'result' ->> 'kind' = $${values.length}`);
+      }
       if (filters.q) {
         values.push(`%${filters.q.replace(/[\\%_]/g, "\\$&")}%`);
         const parameter = `$${values.length}`;
         conditions.push(`(display_name ILIKE ${parameter} ESCAPE E'\\\\' OR concern ILIKE ${parameter} ESCAPE E'\\\\' OR reference ILIKE ${parameter} ESCAPE E'\\\\')`);
       }
       const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+      const matching = await client.query<{ count: string }>(`SELECT COUNT(*) AS count FROM pharmacy_cases ${where}`, values);
+      const matchedTotal = Number(matching.rows[0].count);
+      const pageSize = 20;
+      const page = Math.min(filters.page ?? 1, Math.max(1, Math.ceil(matchedTotal / pageSize)));
+      // SQL identifiers and direction are chosen only from these authored fragments.
+      const order = filters.sort === "oldest" ? "created_at ASC, id ASC" : filters.sort === "updated" ? "updated_at DESC, id DESC" : "created_at DESC, id DESC";
       const rows = await client.query<CaseRow>(
-        `SELECT * FROM pharmacy_cases ${where} ORDER BY created_at DESC, id DESC LIMIT 200`, values,
+        `SELECT * FROM pharmacy_cases ${where} ORDER BY ${order} LIMIT $${values.length + 1} OFFSET $${values.length + 2}`,
+        [...values, pageSize, (page - 1) * pageSize],
       );
-      return { cases: rows.rows.map(listItem), counts, total: counts.new + counts.in_review + counts.completed };
+      return { cases: rows.rows.map(listItem), counts, total: counts.new + counts.in_review + counts.completed, matchedTotal, page, pageSize };
     }, true);
   }
 

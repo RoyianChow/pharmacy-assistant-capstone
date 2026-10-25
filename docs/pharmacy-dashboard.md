@@ -17,16 +17,20 @@ The submission key is unique to the conversation. Retrying the same payload retu
 
 Open `/auth/sign-in` to sign in, create an account, or verify an email with a code. Registration alone never grants staff access. A verified email must appear in the server's `PHARMACY_STAFF_EMAILS` allowlist, or the account must have explicit user-ID approval. Both the page and protected API routes enforce access. The patient submission endpoint remains public. See [staff onboarding and configuration](neon-auth.md).
 
-`/pharmacy` shows counts for New, In review and Completed, with search and status filtering. The list returns up to 200 recent matching cases. Auto refresh updates the queue; the detail panel preserves unsaved review edits. Select a case to view patient details, original answers, the screening result and linked references, and the review history.
+`/pharmacy` shows counts for New, In review and Completed, with search, status and screening-outcome filters. Sort by newest submission, oldest submission or most recently updated. Matching results use 20-case pages; matching counts remain separate from global status counts. The server clamps an out-of-range page to the last available page. Auto refresh updates the queue while preserving unsaved review edits.
+
+Select a case to open its Overview, Assessment answers, or Review & history tab. The overview highlights symptoms, health history, medicines, allergies and the screening result. The answers tab retains every submitted answer, while the review tab keeps the editable review and saved history together. Switching tabs retains the draft. Switching or closing cases and following the dashboard's internal navigation links asks before discarding unsaved edits; leaving or reloading the browser page also warns while a draft or save is active.
 
 Save a required reviewer name, notes and status. Completion also requires notes. A completed case may be reopened as needed. These are simulated review states, not clinical authorization. Original assessment answers and results remain unchanged; each review change is appended to the case history. Version checks reject stale updates so a reviewer can reload the latest case before saving again.
+
+Requests have a 20-second deadline and validate responses before rendering. Case switching and internal navigation are blocked during a save. If a save's outcome cannot be confirmed, load the latest saved review before retrying; the draft is retained for comparison. An identical draft becomes unchanged when the reload confirms it was already saved, avoiding a duplicate review event.
 
 ## Server API
 
 | Method and route | Request | Response |
 | --- | --- | --- |
 | POST `/api/pharmacy/cases` | `{submissionKey, patient: {displayName, contactPreference, contact}, answers, consentToShare: true}` | `{receipt: {id, reference, createdAt, status}}`; 201 on creation, 200 on identical retry |
-| GET `/api/pharmacy/cases?q=...&status=...` | Optional search and status | `{cases, counts, total}`; counts cover the entire queue |
+| GET `/api/pharmacy/cases?q=...&status=...&outcome=...&sort=...&page=...` | Optional search, status, screening outcome, sort (`newest`, `oldest`, `updated`) and page (1–100,000) | `{cases, counts, total, matchedTotal, page, pageSize}`; page size is 20, counts and total cover the entire queue |
 | GET `/api/pharmacy/cases/:id` | Case UUID | `{case}` including answer snapshot, screening result and review history |
 | PATCH `/api/pharmacy/cases/:id` | `{status, reviewerName, reviewNotes, version}` | `{case}` with incremented version and appended review event |
 
@@ -104,6 +108,10 @@ The authenticated production dashboard was tested with fictional case `MA-0D415A
 - After restoring the local checkout and reinstalling its locked dependencies, the full suite passed all 90 tests with zero failures, and `npm run build` completed successfully. A fresh PostgreSQL read repeated the exact review and unchanged patient-data checks successfully.
 
 This run used fictional information only. No patient contact or prescription was created. These checks verify review persistence and conflict handling; they do not establish clinical validity.
+
+## Dashboard organization checks — 2026-10-25
+
+The production build and lint passed. The full automated suite passed 103 tests. New temporary SQLite regressions cover 45 cases across three pages without gaps or duplicates, stable timestamp/ID sorting, recently updated ordering, combined literal search/status/outcome filters, global versus matching counts, empty results, page clamping and invalid query parameters. These checks do not execute PostgreSQL queries; hosted behavior is checked separately through the authenticated dashboard.
 
 ## Checks and remaining work
 

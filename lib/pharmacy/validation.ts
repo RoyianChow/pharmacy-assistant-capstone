@@ -2,7 +2,7 @@ import "server-only";
 import { assess, summarize, validateAnswers } from "../assessment/engine";
 import { canSubmitAssessment } from "./types";
 import type { Answer, AssessmentResult, SummaryItem } from "../assessment/types";
-import type { CaseStatus, PatientDetails } from "./types";
+import type { CaseFilters, CaseStatus, PatientDetails } from "./types";
 
 export class PharmacyError extends Error {
   constructor(message: string, public readonly status = 400, public readonly code?: string) { super(message); }
@@ -76,8 +76,20 @@ export function validateReview(input: unknown): ValidReview {
   return { status, reviewerName, reviewNotes, version: body.version as number };
 }
 
-export function validateFilters(url: URL): { q: string; status?: CaseStatus } {
+export function validateFilters(url: URL): CaseFilters {
   const q = text(url.searchParams.get("q") ?? "", "Search", 120, false);
   const status = url.searchParams.get("status");
-  return { q, status: !status || status === "all" ? undefined : validateStatus(status) };
+  const outcome = url.searchParams.get("outcome");
+  if (outcome && !["all", "pharmacist", "outside_scope", "incomplete", "emergency", "urgent"].includes(outcome)) throw new PharmacyError("Choose a valid screening outcome.");
+  const sort = url.searchParams.get("sort") ?? "newest";
+  if (sort !== "newest" && sort !== "oldest" && sort !== "updated") throw new PharmacyError("Choose a valid queue order.");
+  const requestedPage = url.searchParams.get("page") ?? "1";
+  if (!/^[1-9]\d{0,5}$/.test(requestedPage) || Number(requestedPage) > 100_000) throw new PharmacyError("Choose a page between 1 and 100,000.");
+  return {
+    q,
+    status: !status || status === "all" ? undefined : validateStatus(status),
+    outcome: !outcome || outcome === "all" ? undefined : outcome as AssessmentResult["kind"],
+    sort,
+    page: Number(requestedPage),
+  };
 }

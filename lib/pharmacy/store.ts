@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { PharmacyError } from "./validation";
 import type { ValidReview, ValidSubmission } from "./validation";
 import type { PostgresPharmacyStore } from "./postgres-store";
-import type { CaseListItem, CaseStatus, DashboardResponse, PharmacyCase, ReviewEvent, SubmissionReceipt } from "./types";
+import type { CaseFilters, CaseListItem, CaseStatus, DashboardResponse, PharmacyCase, ReviewEvent, SubmissionReceipt } from "./types";
 
 type Snapshot = Pick<PharmacyCase, "patient" | "answers" | "summary" | "result" | "concern">;
 type CaseRow = {
@@ -93,20 +93,32 @@ export class PharmacyStore {
     } catch (error) { this.db.exec("ROLLBACK"); throw error; }
   }
 
-  list(filters: { q: string; status?: CaseStatus }): DashboardResponse {
-    const counts = { new: 0, in_review: 0, completed: 0 };
-    for (const row of this.db.prepare("SELECT status, COUNT(*) AS count FROM pharmacy_cases GROUP BY status").all() as { status: CaseStatus; count: number }[]) counts[row.status] = row.count;
-    const conditions: string[] = [];
-    const values: string[] = [];
-    if (filters.status) { conditions.push("status = ?"); values.push(filters.status); }
-    if (filters.q) {
-      const match = `%${filters.q.replace(/[\\%_]/g, "\\$&")}%`;
-      conditions.push("(display_name LIKE ? ESCAPE '\\' OR concern LIKE ? ESCAPE '\\' OR reference LIKE ? ESCAPE '\\')");
-      values.push(match, match, match);
-    }
-    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-    const rows = this.db.prepare(`SELECT * FROM pharmacy_cases ${where} ORDER BY created_at DESC, id DESC LIMIT 200`).all(...values) as CaseRow[];
-    return { cases: rows.map(listItem), counts, total: counts.new + counts.in_review + counts.completed };
+  list(filters: CaseFilters): DashboardResponse {
+    // Counts and this page come from the same snapshot, including concurrent reviews.
+    this.db.exec("BEGIN");
+    try {
+      const counts = { new: 0, in_review: 0, completed: 0 };
+      for (const row of this.db.prepare("SELECT status, COUNT(*) AS count FROM pharmacy_cases GROUP BY status").all() as { status: CaseStatus; count: number }[]) counts[row.status] = row.count;
+      const conditions: string[] = [];
+      const values: string[] = [];
+      if (filters.status) { conditions.push("status = ?"); values.push(filters.status); }
+      if (filters.outcome) { conditions.push("json_extract(snapshot_json, '$.result.kind') = ?"); values.push(filters.outcome); }
+      if (filters.q) {
+        const match = `%${filters.q.replace(/[\\%_]/g, "\\$&")}%`;
+        conditions.push("(display_name LIKE ? ESCAPE '\\' OR concern LIKE ? ESCAPE '\\' OR reference LIKE ? ESCAPE '\\')");
+        values.push(match, match, match);
+      }
+      const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+      const matchedTotal = (this.db.prepare(`SELECT COUNT(*) AS count FROM pharmacy_cases ${where}`).get(...values) as { count: number }).count;
+      const pageSize = 20;
+      const page = Math.min(filters.page ?? 1, Math.max(1, Math.ceil(matchedTotal / pageSize)));
+      // SQL identifiers and direction are chosen only from these authored fragments.
+      const order = filters.sort === "oldest" ? "created_at ASC, id ASC" : filters.sort === "updated" ? "updated_at DESC, id DESC" : "created_at DESC, id DESC";
+      const rows = this.db.prepare(`SELECT * FROM pharmacy_cases ${where} ORDER BY ${order} LIMIT ? OFFSET ?`).all(...values, pageSize, (page - 1) * pageSize) as CaseRow[];
+      const cases = rows.map(listItem);
+      this.db.exec("COMMIT");
+      return { cases, counts, total: counts.new + counts.in_review + counts.completed, matchedTotal, page, pageSize };
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
   }
 
   get(id: string): PharmacyCase {

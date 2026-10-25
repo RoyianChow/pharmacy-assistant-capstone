@@ -548,6 +548,120 @@ test("search and status filters use literal parameters and counts reflect the wh
   assert.equal((await getQueue("?q=" + "a".repeat(121))).status, 400);
 });
 
+test("queue pages cover every case once and clamp beyond the final page even when timestamps tie", async t => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse("2026-01-01T10:00:00.000Z") });
+  const receipts = [];
+  for (let index = 0; index < 45; index += 1) {
+    receipts.push(await create(submission({ patient: { displayName: `Fictional Page Patient ${index}`, contactPreference: "in_person", contact: "" } })));
+  }
+  assert.equal(new Set(receipts.map(item => item.createdAt)).size, 1);
+  const expectedIds = receipts.map(item => item.id).sort().reverse();
+  const allIds = [];
+  let lastPage;
+  for (const page of [1, 2, 3]) {
+    const response = await getQueue(`?page=${page}`);
+    assert.equal(response.status, 200);
+    privateResponse(response);
+    const queue = await response.json();
+    assert.equal(queue.total, 45);
+    assert.equal(queue.matchedTotal, 45);
+    assert.equal(queue.pageSize, 20);
+    assert.equal(queue.page, page);
+    assert.deepEqual(queue.counts, { new: 45, in_review: 0, completed: 0 });
+    const ids = queue.cases.map(item => item.id);
+    assert.deepEqual(ids, expectedIds.slice((page - 1) * 20, page * 20));
+    allIds.push(...ids);
+    lastPage = queue;
+  }
+  assert.equal(new Set(allIds).size, 45);
+  assert.deepEqual(allIds, expectedIds);
+  assert.deepEqual(await (await getQueue("?page=100000")).json(), lastPage);
+});
+
+test("newest, oldest and updated queue orders respect timestamps and stable ID tie-breaks", async t => {
+  const startedAt = Date.parse("2026-01-01T10:00:00.000Z");
+  t.mock.timers.enable({ apis: ["Date"], now: startedAt });
+  const first = await create();
+  const second = await create();
+  t.mock.timers.tick(1000);
+  const third = await create();
+  assert.equal(first.createdAt, second.createdAt);
+  assert.ok(third.createdAt > first.createdAt);
+  const tiedIds = [first.id, second.id].sort();
+  const newestIds = [third.id, ...tiedIds.toReversed()];
+  const oldestIds = [...tiedIds, third.id];
+  for (const [query, expected] of [["", newestIds], ["?sort=newest", newestIds], ["?sort=oldest", oldestIds]]) {
+    assert.deepEqual((await (await getQueue(query)).json()).cases.map(item => item.id), expected);
+  }
+  t.mock.timers.tick(1000);
+  for (const item of [first, second]) {
+    const saved = await detail.PATCH(request(review(), { method: "PATCH" }), context(item.id));
+    assert.equal(saved.status, 200);
+  }
+  const updated = await (await getQueue("?sort=updated")).json();
+  assert.deepEqual(updated.cases.map(item => item.id), [...tiedIds.toReversed(), third.id]);
+  assert.equal(updated.cases[0].updatedAt, updated.cases[1].updatedAt);
+  assert.ok(updated.cases[1].updatedAt > updated.cases[2].updatedAt);
+  // Reviewing older cases does not change their position in creation-time ordering.
+  assert.deepEqual((await (await getQueue("?sort=newest")).json()).cases.map(item => item.id), newestIds);
+  assert.deepEqual((await (await getQueue("?sort=oldest")).json()).cases.map(item => item.id), oldestIds);
+});
+
+test("combined queue filters report matching totals while preserving global counts and clamp empty results", async () => {
+  const fixtures = [
+    { name: "Fictional Cohort_100% A", status: "in_review", concern: "allergies" },
+    { name: "Fictional Cohort_100% B", status: "in_review", concern: "allergies" },
+    { name: "Fictional Cohort_100% New", status: "new", concern: "allergies" },
+    { name: "Fictional Cohort_100% Other concern", status: "in_review", concern: "other" },
+    { name: "Fictional CohortX100anything", status: "in_review", concern: "allergies" },
+    { name: "Fictional Cohort_100% Completed", status: "completed", concern: "allergies" },
+  ];
+  const receipts = [];
+  for (const fixture of fixtures) {
+    const receipt = await create(submission({ patient: { displayName: fixture.name, contactPreference: "in_person", contact: "" }, answers: answers({ concern: fixture.concern }) }));
+    receipts.push(receipt);
+    if (fixture.status !== "new") {
+      assert.equal((await detail.PATCH(request(review({ status: fixture.status }), { method: "PATCH" }), context(receipt.id))).status, 200);
+    }
+  }
+  const query = new URLSearchParams({ q: "Cohort_100%", status: "in_review", outcome: "pharmacist", page: "99999" });
+  const filtered = await (await getQueue(`?${query}`)).json();
+  assert.equal(filtered.total, 6);
+  assert.equal(filtered.matchedTotal, 2);
+  assert.equal(filtered.page, 1);
+  assert.equal(filtered.pageSize, 20);
+  assert.deepEqual(filtered.counts, { new: 1, in_review: 4, completed: 1 });
+  assert.deepEqual(new Set(filtered.cases.map(item => item.id)), new Set(receipts.slice(0, 2).map(item => item.id)));
+  query.set("outcome", "outside_scope");
+  const outside = await (await getQueue(`?${query}`)).json();
+  assert.equal(outside.matchedTotal, 1);
+  assert.deepEqual(outside.cases.map(item => item.id), [receipts[3].id]);
+  query.set("outcome", "urgent");
+  const empty = await (await getQueue(`?${query}`)).json();
+  assert.deepEqual(empty.cases, []);
+  assert.equal(empty.matchedTotal, 0);
+  assert.equal(empty.page, 1);
+  assert.equal(empty.total, 6);
+  assert.deepEqual(empty.counts, filtered.counts);
+  const all = await (await getQueue("?status=all&outcome=all")).json();
+  assert.equal(all.matchedTotal, 6);
+  assert.equal(all.cases.length, 6);
+});
+
+test("invalid page, sort and outcome filters reject before opening storage", async () => {
+  const invalidPages = ["", "0", "-1", "1.5", "1e2", "Infinity", "NaN", "01", "100001", "999999999999999999999", "1; SELECT 1"];
+  const invalidSorts = ["", "NEWEST", "created_at", "newest; SELECT 1"];
+  const invalidOutcomes = ["prescribed", "PHARMACIST", "pharmacist' OR 1=1 --"];
+  for (const [key, values] of [["page", invalidPages], ["sort", invalidSorts], ["outcome", invalidOutcomes]]) {
+    for (const value of values) {
+      const response = await getQueue(`?${new URLSearchParams({ [key]: value })}`);
+      assert.equal(response.status, 400, `${key}=${value}`);
+      privateResponse(response);
+    }
+  }
+  assert.equal(existsSync(process.env.PHARMACY_DATABASE_PATH), false);
+});
+
 test("missing and malformed identifiers return 404 for reads and updates", async () => {
   for (const id of [randomUUID(), "../secret"]) {
     assert.equal((await detail.GET(request(undefined, { method: "GET" }), context(id))).status, 404);
