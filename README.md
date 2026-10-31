@@ -66,7 +66,7 @@ Existing local SQLite records are not automatically copied to PostgreSQL. A code
 
 ## Prescription verification with PaddleOCR
 
-The `/prescriptions` staff page extracts text from PNG/JPEG images, identifies labelled fields, and shows confidence, missing information, and an original-image comparison. It includes an Ontario-style fictional prescription as a PNG and PDF, prominently marked **DEMO — NOT VALID FOR DISPENSING**. OCR does not establish authenticity, legal validity, or clinical appropriateness. Images and results are not saved to the dashboard.
+The `/prescriptions` staff page extracts text from PNG/JPEG images, identifies labelled fields, and shows confidence, missing information, and an original-image comparison. It includes an Ontario-style fictional prescription as a PNG and PDF, prominently marked **DEMO — NOT VALID FOR DISPENSING**. OCR does not establish authenticity, legal validity, or clinical appropriateness. Images and extracted details are not saved to the dashboard. Its prescription overview links to the page and shows OCR configuration plus successful scan counts, latest field totals, and processing time from the current browser tab.
 
 After the one-time [Python service setup](services/paddleocr/README.md), run these commands in separate terminals:
 

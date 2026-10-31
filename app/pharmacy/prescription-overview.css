@@ -1,0 +1,38 @@
+.ph-rx-overview { margin: 0 0 24px; border: 1px solid #dce6dc; border-radius: 11px; background: #fff; color: #254c43; overflow: hidden; }
+.ph-rx-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 23px 24px 18px; }
+.ph-rx-title-group { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.ph-rx-icon { display: grid; place-items: center; flex-shrink: 0; width: 45px; height: 45px; border: 1px solid #dce7d5; border-radius: 11px; background: #eff5e9; color: #62835c; }
+.ph-rx-eyebrow { margin: 0 0 4px; color: #7b9273; font-size: 8px; font-weight: 700; letter-spacing: 1.3px; }
+.ph-rx-title-group h2 { margin: 0; color: #34593f; font-size: 17px; font-weight: 600; letter-spacing: -.3px; }
+.ph-rx-description { margin: 4px 0 0; color: #70826a; font-size: 11px; }
+.ph-rx-open { display: inline-flex; align-items: center; justify-content: center; gap: 17px; flex-shrink: 0; min-height: 39px; padding: 10px 13px; border: 1px solid #cfdcca; border-radius: 6px; background: #f8fbf3; color: #4b6d46; font-size: 11px; font-weight: 600; }
+.ph-rx-open:hover { background: #eaf2e2; border-color: #9db58f; }
+.ph-rx-open > span { font-size: 15px; line-height: 1; }
+.ph-rx-scope-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 0 24px 13px; }
+.ph-rx-scope-row > p { margin: 0; color: #5e7856; font-size: 10px; font-weight: 600; }
+.ph-rx-scope-row > p > span { color: #8a967f; font-weight: 400; }
+.ph-rx-service { display: flex; align-items: center; gap: 8px; }
+.ph-rx-status { display: inline-flex; align-items: center; gap: 6px; font-size: 9px; color: #78866c; }
+.ph-rx-status i { width: 5px; height: 5px; border-radius: 50%; background: #a1b292; flex-shrink: 0; }
+.ph-rx-status-configured { color: #628358; }
+.ph-rx-status-configured i { background: #719367; }
+.ph-rx-status-unconfigured, .ph-rx-status-error { color: #8b7953; }
+.ph-rx-status-unconfigured i, .ph-rx-status-error i { background: #b39c6c; }
+.ph-rx-service button { border: 0; background: transparent; color: #5b754e; padding: 3px; font-size: 10px !important; text-decoration: underline; text-underline-offset: 3px; }
+.ph-rx-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0 24px; }
+.ph-rx-metrics > div { display: flex; flex-direction: column; padding: 15px 17px; border: 1px solid #e2e9db; border-radius: 7px; background: #f9fbf5; }
+.ph-rx-metrics dt { flex: 1; color: #657d5b; font-size: 10px; }
+.ph-rx-metrics dd { margin: 5px 0 3px; color: #476c43; font-size: 28px; font-weight: 500; letter-spacing: -.6px; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.ph-rx-metrics dd > span { color: #839579; font-size: 15px; font-weight: 400; }
+.ph-rx-metrics .ph-rx-metric-caption { margin: 0; color: #8b9781; font-size: 9px; font-weight: 400; letter-spacing: 0; line-height: 1.65; }
+.ph-rx-activity-note { padding: 13px 24px 17px; }
+.ph-rx-activity-note p { margin: 0; font-size: 10px; color: #77866e; }
+.ph-rx-activity-note time { color: #5f7953; }
+.ph-rx-duration { display: inline-block; margin-left: 5px; color: #8c9882; }
+.ph-rx-activity-note .ph-rx-service-help { margin-top: 5px; color: #8a7956; }
+.ph-rx-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid #e7ede0; background: #fcfdf9; padding: 11px 24px; }
+.ph-rx-footer p { margin: 0; font-size: 9px; color: #7f8e75; }
+.ph-rx-footer > span { color: #6d825e; font-size: 9px; white-space: nowrap; }
+@media (max-width: 1000px) { .ph-rx-description { max-width: 340px; } .ph-rx-heading { gap: 18px; } .ph-rx-open { gap: 10px; font-size: 10px; } .ph-rx-metrics > div { padding: 14px; } }
+@media (max-width: 700px) { .ph-rx-heading { align-items: flex-start; flex-direction: column; gap: 16px; } .ph-rx-description { max-width: none; } .ph-rx-open { font-size: 11px; } .ph-rx-footer { align-items: flex-start; flex-direction: column; gap: 5px; } .ph-rx-metrics { gap: 9px; } .ph-rx-metrics > div { padding: 12px; } .ph-rx-metrics .ph-rx-metric-caption { display: none; } .ph-rx-metrics dt { min-height: 32px; } }
+@media (max-width: 450px) { .ph-rx-heading { padding: 19px 17px 17px; } .ph-rx-title-group { align-items: flex-start; gap: 11px; } .ph-rx-icon { width: 37px; height: 40px; border-radius: 8px; } .ph-rx-title-group h2 { font-size: 16px; } .ph-rx-description { font-size: 10px; } .ph-rx-open { width: 100%; justify-content: space-between; } .ph-rx-scope-row { padding: 0 17px 13px; flex-wrap: wrap; gap: 6px; } .ph-rx-metrics { margin: 0 17px; gap: 7px; } .ph-rx-metrics > div { padding: 11px 9px; } .ph-rx-metrics dt { font-size: 9px; min-height: 42px; } .ph-rx-metrics dd { font-size: 24px; } .ph-rx-metrics dd > span { font-size: 12px; } .ph-rx-activity-note { padding: 12px 17px 16px; } .ph-rx-duration { display: block; margin-left: 0; } .ph-rx-footer { padding: 11px 17px; } }

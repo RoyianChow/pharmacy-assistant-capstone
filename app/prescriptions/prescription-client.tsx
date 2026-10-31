@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import SiteBrand from "../components/site-brand";
 import { MAX_PRESCRIPTION_BYTES, PRESCRIPTION_TYPES, type PrescriptionAvailability, type PrescriptionResult } from "@/lib/prescription/types";
 import { parseAvailability, parsePrescriptionResponse, requestError } from "./response";
+import { recordPrescriptionActivity } from "@/lib/prescription/activity";
 
 function ScanIcon({ size = 30 }: { size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M11 5H5v6m16-6h6v6M5 21v6h6m16-6v6h-6M11 11h10M11 16h10M11 21h6" /></svg>;
@@ -92,7 +93,7 @@ export default function PrescriptionClient() {
       let payload: unknown;
       try { payload = await response.json(); } catch { throw new Error("The extraction service returned an unreadable response. Please try again."); }
       const data = parsePrescriptionResponse(payload);
-      if (request.current === controller) { setResult(data); requestAnimationFrame(() => resultRef.current?.focus({ preventScroll: true })); }
+      if (request.current === controller) { setResult(data); recordPrescriptionActivity(data); requestAnimationFrame(() => resultRef.current?.focus({ preventScroll: true })); }
     } catch (err) {
       if (request.current === controller) setError(timedOut ? "Text extraction took too long. Your image is still selected; please try again." : err instanceof Error && err.name !== "TypeError" ? err.message : "We couldn’t reach the extraction service. Check your connection and try again.");
     } finally {
@@ -117,7 +118,7 @@ export default function PrescriptionClient() {
         <div className="rx-extract-controls">
           <label className="rx-consent"><input type="checkbox" checked={consent} disabled={!file || busy || loadingDemo} onChange={event => setConsent(event.target.checked)} /><span>I confirm this image contains fictional details and can be sent to the OCR service for this demo.</span></label>
           <button type="button" className="rx-primary" onClick={extract} disabled={!file || !consent || busy || loadingDemo || !availability?.configured}>{busy ? <><i className="rx-spinner" />Extracting text…</> : <><ScanIcon size={19} />Extract with PaddleOCR</>}</button>
-          <p className="rx-retention-note">Images and extracted fields are not saved to the case dashboard. Comparison marks clear when you select another image or leave this page.</p>
+          <p className="rx-retention-note">Images and extracted fields are not saved to the case dashboard. Only scan counts and timing are kept in this browser tab for the dashboard overview. Comparison marks clear when you select another image or leave this page.</p>
         </div>
       </section>
       <section className="rx-results" aria-labelledby="rx-results-title" tabIndex={-1} ref={resultRef} aria-busy={busy}>

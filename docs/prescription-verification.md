@@ -9,6 +9,9 @@ The staff page at `/prescriptions` supports text extraction and manual compariso
 3. In another terminal, run `npm.cmd run dev:prescriptions`.
 4. Visit `http://localhost:3001/prescriptions` (use `localhost`, which matches Next.js development request origins). Load the Ontario demo, acknowledge that its details are fictional, then choose **Extract with PaddleOCR**.
 5. Compare the extracted patient, date, prescriber, medication, and other fields against the image. Open **Original OCR text** to inspect the full recognition result. Comparison checkboxes are temporary UI marks, not a saved pharmacist decision.
+6. Return to **Pharmacy dashboard** in the same tab. Its prescription verification section links back to this page and shows the number of successful extractions, the latest extracted/total fields, fields flagged or missing, and the last scan time/duration. The OCR badge reports configuration, not live model health.
+
+Only aggregate counts and timing are stored in this tab's `sessionStorage`; no image, file name, OCR text, patient/prescriber identity, or field values are stored there. These are local activity totals, not shared pharmacy records or a clinical audit log. They survive a same-tab reload, remain separate from assessment counts, and end with the browser session. If browser storage is unavailable, OCR still works but the overview cannot retain activity. A scan contributes only after a successful, validated response; retries that fail do not increment the count.
 
 The local launcher binds Next.js to loopback, clears remote database/Auth variables in its child process, and chooses a separate local SQLite path. It uses the application's existing local demo access rule. It does not edit `.env.local`, modify hosted access, or contact the hosted database. The Python service also binds to loopback. Neither service persists prescription uploads or results.
 

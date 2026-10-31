@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import SiteBrand from "../components/site-brand";
+import PrescriptionOverview from "./prescription-overview";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type MouseEvent } from "react";
 import type { AssessmentResult, SummaryItem } from "@/lib/assessment/types";
 import type { CaseListItem, CaseSort, CaseStatus, DashboardResponse, PharmacyCase } from "@/lib/pharmacy/types";
@@ -143,7 +144,7 @@ export default function PharmacyClient() {
       <span className="ph-local"><i/> Demo workspace</span>
     </header>
     <section className="ph-intro">
-      <div><p className="ph-eyebrow">ONTARIO · MINOR AILMENTS</p><h1>Pharmacy workspace<span>.</span></h1><p>Your assessment inbox. Review the details, then plan the next conversation.</p></div>
+      <div><p className="ph-eyebrow">ONTARIO · PHARMACY WORKSPACE</p><h1>Pharmacy workspace<span>.</span></h1><p>Review patient assessments and prescription documents in one place.</p></div>
       <Link className="ph-button ph-button-light" href="/assessment">Open patient assessment <Icon name="arrow" size={16}/></Link>
     </section>
     <aside className="ph-demo"><span className="ph-demo-label">DEMONSTRATION</span><p>Fictional records only. The hosted workspace is available only to approved staff. This educational demo is not for real patient information. Screening results require a pharmacist’s assessment.</p></aside>
@@ -156,6 +157,7 @@ export default function PharmacyClient() {
     </section>
     {pendingAction && <div className="ph-confirmation-backdrop"><div className="ph-switch-confirmation" role="alertdialog" aria-modal="true" aria-labelledby="ph-discard-title" aria-describedby="ph-discard-description" onKeyDown={event => { if (event.key === "Escape") { setPendingAction(null); detailRef.current?.focus(); } if (event.key === "Tab") { const buttons = event.currentTarget.querySelectorAll<HTMLButtonElement>("button"); if (event.shiftKey && document.activeElement === buttons[0]) { event.preventDefault(); buttons[1]?.focus(); } else if (!event.shiftKey && document.activeElement === buttons[1]) { event.preventDefault(); buttons[0]?.focus(); } } }}><div><strong id="ph-discard-title">Keep your review draft?</strong><p id="ph-discard-description">You have unsaved changes. Discard them to {pendingAction.kind === "navigate" ? "leave this page" : pendingAction.id === null ? "close this assessment" : "open the other assessment"}, or keep editing.</p></div><div><button ref={keepEditingRef} type="button" className="ph-button ph-button-primary" onClick={() => { setPendingAction(null); detailRef.current?.focus(); }}>Keep editing</button><button type="button" className="ph-button ph-button-light" onClick={discardAndContinue}>Discard changes</button></div></div></div>}
     {reviewSaving && <p className="ph-save-in-progress" role="status">Saving your review. Please keep this page open until saving finishes.</p>}
+    <PrescriptionOverview />
     <div className="ph-workbench">
       <section className="ph-inbox" aria-labelledby="ph-inbox-title">
         <div className="ph-inbox-heading"><div><p className="ph-eyebrow">ASSESSMENT QUEUE</p><h2 id="ph-inbox-title">Patient submissions <span>{dashboard?.total ?? "—"}</span></h2></div><button className="ph-icon-button" type="button" onClick={refresh} disabled={loading} aria-label="Refresh assessment queue" title="Refresh queue"><Icon name="refresh"/></button></div>
