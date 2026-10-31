@@ -7,6 +7,8 @@
   },
   "scripts": {
     "dev": "next dev",
+    "dev:prescriptions": "node scripts/start-prescription-demo.mjs",
+    "ocr:serve": "node scripts/start-paddleocr.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",

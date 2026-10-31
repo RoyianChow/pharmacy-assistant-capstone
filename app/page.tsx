@@ -12,8 +12,8 @@ const workflows = [
     number: "02",
     title: "Prescription verification",
     description:
-      "Review typed prescriptions for required fields, recorded allergies, duplicate ingredients, and a small set of supported checks.",
-    status: "Planned",
+      "Extract text from fictional prescription images with PaddleOCR, compare the fields, and identify details that need a pharmacist’s review.",
+    status: "Staff workspace",
   },
 ];
 
@@ -31,7 +31,7 @@ export default function Home() {
         <nav className="top-nav" aria-label="Main navigation">
           <a href="/assessment">Patient assessment</a>
           <a href="/pharmacy">Pharmacy dashboard</a>
-          <a href="#workflows">Workflows</a>
+          <a href="/prescriptions">Prescriptions</a>
           <a href="#scope">Project scope</a>
           <span className="local-badge"><span className="status-dot" /> Local prototype</span>
         </nav>
@@ -91,7 +91,7 @@ export default function Home() {
         <div className="section-heading">
           <div>
             <p className="eyebrow eyebrow-dark">THE FIRST VERSION</p>
-            <h2>Two workflows, one case record.</h2>
+            <h2>Two workflows, one workspace.</h2>
           </div>
           <p className="section-intro">
             The initial scope stays small enough to build and evaluate within an eight-week capstone.
@@ -106,7 +106,7 @@ export default function Home() {
               </div>
               <h3>{workflow.title}</h3>
               <p>{workflow.description}</p>
-              {workflow.number === "01" ? <a className="card-footer" href="/assessment">Open assessment <span aria-hidden="true">↗</span></a> : <span className="card-footer">Fictional cases only <span aria-hidden="true">↗</span></span>}
+              {workflow.number === "01" ? <a className="card-footer" href="/assessment">Open assessment <span aria-hidden="true">↗</span></a> : <a className="card-footer" href="/prescriptions">Open prescription verification <span aria-hidden="true">↗</span></a>}
             </article>
           ))}
         </div>

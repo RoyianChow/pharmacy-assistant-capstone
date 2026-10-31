@@ -139,7 +139,7 @@ export default function PharmacyClient() {
   return <main className="ph-page" onClickCapture={guardNavigation}>
     <header className="ph-topbar">
       <SiteBrand />
-      <nav aria-label="Main navigation"><Link href="/">Overview</Link><Link href="/assessment">Patient assessment</Link><Link href="/pharmacy" aria-current="page">Pharmacy workspace</Link></nav>
+      <nav aria-label="Main navigation" style={{ flexWrap: "wrap" }}><Link href="/">Overview</Link><Link href="/assessment">Patient assessment</Link><Link href="/pharmacy" aria-current="page">Pharmacy workspace</Link><Link href="/prescriptions">Prescriptions</Link></nav>
       <span className="ph-local"><i/> Demo workspace</span>
     </header>
     <section className="ph-intro">

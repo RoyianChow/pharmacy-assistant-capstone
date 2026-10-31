@@ -14,7 +14,7 @@ An eight-week COMP 385 capstone prototype exploring how AI agents can organize m
 - One hundred synthetic cases: 60 for development and 40 held for final evaluation.
 - A human reviewer makes and records every simulated clinical decision.
 
-The first version is deliberately narrow. It will not use real patient data, scanned or handwritten prescriptions, pharmacy system connections, or comprehensive interaction checking. Hosted demonstrations must also use fictional data; the staff workspace requires an approved account.
+The first version is deliberately narrow. It does not use real patient data, pharmacy system connections, or comprehensive interaction checking. The prescription demo now supports images of typed fictional documents; handwriting is not a validated input. Hosted demonstrations must also use fictional data; the staff workspace requires an approved account.
 
 ## Getting started
 
@@ -63,6 +63,21 @@ The workspace is linked to the existing Neon organization/project through the ig
 5. Staff use `/auth/sign-in` to register, verify their email with its code, and sign in. Their exact verified email must also be approved in the allowlist. See [docs/neon-auth.md](docs/neon-auth.md) for setup and access rules.
 
 Existing local SQLite records are not automatically copied to PostgreSQL. A code change or successful build does not confirm the hosted database connection; check a fictional submission after deployment. For setup and troubleshooting, see [the dashboard guide](docs/pharmacy-dashboard.md#vercel-setup).
+
+## Prescription verification with PaddleOCR
+
+The `/prescriptions` staff page extracts text from PNG/JPEG images, identifies labelled fields, and shows confidence, missing information, and an original-image comparison. It includes an Ontario-style fictional prescription as a PNG and PDF, prominently marked **DEMO — NOT VALID FOR DISPENSING**. OCR does not establish authenticity, legal validity, or clinical appropriateness. Images and results are not saved to the dashboard.
+
+After the one-time [Python service setup](services/paddleocr/README.md), run these commands in separate terminals:
+
+```powershell
+npm.cmd run ocr:serve
+npm.cmd run dev:prescriptions
+```
+
+Open [http://localhost:3001/prescriptions](http://localhost:3001/prescriptions), choose **Load Ontario demo**, acknowledge fictional data, and select **Extract with PaddleOCR**. Use `localhost` as shown so the browser origin matches Next.js development requests. This launcher uses the existing local demo access mode and a separate local database path; it leaves `.env.local` and hosted settings unchanged. The Python service runs locally on port 8001 and needs no API key. First startup downloads the models.
+
+See [the prescription guide](docs/prescription-verification.md) for the contract, limits, testing, and future hosting setup. The Vercel app needs a separately hosted HTTPS OCR service before hosted extraction can work.
 
 ## Project map
 
