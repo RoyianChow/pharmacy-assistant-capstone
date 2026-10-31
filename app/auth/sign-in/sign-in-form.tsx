@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { authClient } from "@/lib/auth/client";
+import { authFailure } from "@/lib/auth/errors";
 import StaffSessionControl from "../staff-session-control";
 
 type Mode = "signin" | "signup" | "verify" | "forgot" | "reset";
@@ -23,16 +24,6 @@ function reasonMessage(reason: string) {
   return "";
 }
 
-function authError(error: { code?: string; status?: number; message?: string }) {
-  if (error.code === "EMAIL_NOT_VERIFIED") return "Verify your email address to continue. You can request a code below.";
-  if (["INVALID_EMAIL_OR_PASSWORD", "INVALID_PASSWORD", "USER_NOT_FOUND"].includes(error.code ?? "")) return "The email or password was not accepted. Check your details and try again.";
-  if (error.code === "USER_ALREADY_EXISTS" || error.code === "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL") return "An account already uses this email. Choose Sign in, or Verify email if you still need a verification code.";
-  if (["INVALID_OTP", "OTP_EXPIRED", "TOO_MANY_ATTEMPTS"].includes(error.code ?? "")) return "That code could not be verified. Check it or request a new code.";
-  if (error.status === 429) return "There have been too many attempts. Please wait a moment and try again.";
-  if (error.code === "PASSWORD_TOO_SHORT" || error.code === "PASSWORD_TOO_LONG") return "Choose a password between 8 and 128 characters.";
-  return "We couldn’t complete that request. Please try again or contact the project owner.";
-}
-
 export default function SignInForm({ ready, localDemo, reason }: { ready: boolean; localDemo: boolean; reason: string }) {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>(reason === "verification" ? "verify" : "signin");
@@ -49,6 +40,12 @@ export default function SignInForm({ ready, localDemo, reason }: { ready: boolea
 
   function changeMode(next: Mode) {
     setMode(next); setError(""); setNotice(""); setPassword(""); setOtp("");
+  }
+
+  function showAuthError(error: unknown) {
+    const failure = authFailure(error);
+    setError(failure.message);
+    if (failure.verifyEmail) { setMode("verify"); setPassword(""); }
   }
 
   async function openWorkspace() {
@@ -71,38 +68,37 @@ export default function SignInForm({ ready, localDemo, reason }: { ready: boolea
       const cleanEmail = accountEmail.trim();
       if (mode === "signup") {
         const result = await authClient.signUp.email({ email: cleanEmail, password, name: name.trim() });
-        if (result.error) { setError(authError(result.error)); return; }
+        if (result.error) { showAuthError(result.error); return; }
         setPassword(""); setMode("verify");
         setNotice("Account created. Check your inbox and spam folder for a verification code. If it has not arrived, use Send / resend verification code below. Keep the password you just chose for signing in.");
       } else if (mode === "verify") {
         const result = await authClient.emailOtp.verifyEmail({ email: cleanEmail, otp: otp.trim() });
-        if (result.error) { setError(authError(result.error)); return; }
+        if (result.error) { showAuthError(result.error); return; }
         // Refresh the signed session after email ownership changes.
         await authClient.signOut();
         setOtp(""); setMode("signin");
         setNotice("Email verified. Sign in with the password you chose when creating your account.");
       } else if (mode === "forgot") {
         const result = await authClient.forgetPassword.emailOtp({ email: cleanEmail });
-        if (result.error) { setError(authError(result.error)); return; }
+        if (result.error) { showAuthError(result.error); return; }
         setPassword(""); setOtp(""); setMode("reset");
         setNotice("If an account uses this email, a password reset code has been requested. Check your inbox and spam folder.");
       } else if (mode === "reset") {
         const result = await authClient.emailOtp.resetPassword({ email: cleanEmail, otp: otp.trim(), password });
-        if (result.error) { setError(authError(result.error)); return; }
+        if (result.error) { showAuthError(result.error); return; }
         await authClient.signOut();
         setPassword(""); setOtp(""); setMode("signin");
         setNotice("Password updated. Sign in with your new password.");
       } else {
         const result = await authClient.signIn.email({ email: cleanEmail, password });
         if (result.error) {
-          setError(authError(result.error));
-          if (result.error.code === "EMAIL_NOT_VERIFIED") { setMode("verify"); setPassword(""); }
+          showAuthError(result.error);
           return;
         }
         setPassword("");
         await openWorkspace();
       }
-    } catch { setError("The sign-in service could not be reached. Check your connection and try again."); }
+    } catch (error) { showAuthError(error); }
     finally { setPending(false); }
   }
 
@@ -114,14 +110,14 @@ export default function SignInForm({ ready, localDemo, reason }: { ready: boolea
       const result = mode === "reset"
         ? await authClient.forgetPassword.emailOtp({ email: accountEmail.trim() })
         : await authClient.emailOtp.sendVerificationOtp({ email: accountEmail.trim(), type: "email-verification" });
-      if (result.error) setError(authError(result.error));
+      if (result.error) showAuthError(result.error);
       else {
         setOtp("");
         setNotice(mode === "reset"
           ? "If an account uses this email, a new password reset code has been requested. Use the newest code from your inbox or spam folder."
           : "Verification email requested. Check your inbox and spam folder, then enter the newest code. If it does not arrive, contact the project owner so they can check email delivery.");
       }
-    } catch { setError("The verification code could not be requested. Please try again."); }
+    } catch (error) { showAuthError(error); }
     finally { setPending(false); }
   }
 
