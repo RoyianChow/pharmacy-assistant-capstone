@@ -10,7 +10,7 @@ import pytest
 
 import lambda_function as runtime
 from manifest import load_manifest
-from preprocess import InputError, LABELS, MAX_BYTES, PREPROCESSING, decode_image, preprocess
+from preprocess import DEMO_LABELS, InputError, LABELS, MAX_BYTES, PREPROCESSING, decode_image, preprocess
 from synthetic_fixture import generate
 
 
@@ -27,8 +27,10 @@ def event(payload=None):
 @pytest.fixture(autouse=True)
 def reset_cache():
     runtime.load_model.cache_clear()
+    runtime.load_metadata.cache_clear()
     yield
     runtime.load_model.cache_clear()
+    runtime.load_metadata.cache_clear()
 
 
 def test_full_page_letterbox_is_deterministic_and_not_a_crop():
@@ -81,7 +83,9 @@ def test_success_response_and_numerically_stable_scores(monkeypatch):
         def run(self, names, feed):
             assert names == ["logits"] and feed["image"].shape == (1, 3, 224, 224)
             return [np.array([[1000, 1002]], np.float32)]
-    monkeypatch.setattr(runtime, "load_model", lambda: (Session(), {"modelVersion": "resnet18-0123456789ab"}))
+    metadata = {"modelVersion": "resnet18-0123456789ab", "trainingPurpose": "research_training"}
+    monkeypatch.setattr(runtime, "load_metadata", lambda: metadata)
+    monkeypatch.setattr(runtime, "load_model", lambda: (Session(), metadata))
     result = runtime.handler(event(), None)
     assert result["statusCode"] == 200
     assert result["body"]["predictedLabel"] == "fake"
@@ -95,8 +99,47 @@ def test_exact_ties_resolve_to_fake(monkeypatch):
     class Session:
         def run(self, *_args):
             return [np.array([[0, 0]], np.float32)]
-    monkeypatch.setattr(runtime, "load_model", lambda: (Session(), {"modelVersion": "resnet18-0123456789ab"}))
+    metadata = {"modelVersion": "resnet18-0123456789ab", "trainingPurpose": "research_training"}
+    monkeypatch.setattr(runtime, "load_metadata", lambda: metadata)
+    monkeypatch.setattr(runtime, "load_model", lambda: (Session(), metadata))
     assert runtime.handler(event(), None)["body"]["predictedLabel"] == "fake"
+
+
+def test_synthetic_contract_and_allowlist_precede_cost_and_model(monkeypatch):
+    payload = png()
+    metadata = {"modelVersion": "resnet18-0123456789ab", "trainingPurpose": "synthetic_demo",
+                "allowedImageSha256": [hashlib.sha256(payload).hexdigest()]}
+    calls = []
+    class Session:
+        def run(self, *_args):
+            return [np.array([[0, 1]], np.float32)]
+    monkeypatch.setattr(runtime, "load_metadata", lambda: metadata)
+    monkeypatch.setattr(runtime, "reserve_inference_attempt", lambda: calls.append("budget"))
+    monkeypatch.setattr(runtime, "load_model", lambda: (calls.append("model") or Session(), metadata))
+    assert runtime.handler(event(png(color="white")), None)["statusCode"] == 422
+    assert calls == []
+    response = runtime.handler(event(payload), None)
+    assert calls == ["budget", "model"]
+    assert response["statusCode"] == 200
+    body = response["body"]
+    assert body["schemaVersion"] == 2 and body["mode"] == "synthetic_demo"
+    assert body["predictedLabel"] == "altered_demo" and set(body["scores"]) == set(DEMO_LABELS)
+    assert body["authenticityAssessed"] is False and body["reviewRequired"] is True
+    assert body["validationStatus"] == "synthetic_demo_only"
+
+
+@pytest.mark.parametrize("error,status", [(runtime.MonthlyLimitExceeded, 429), (runtime.CostGuardUnavailable, 503)])
+def test_budget_denial_never_loads_model(monkeypatch, error, status):
+    monkeypatch.setattr(runtime, "load_metadata", lambda: {"trainingPurpose": "research_training"})
+    def denied():
+        raise error("internal counter details")
+    def unexpected():
+        pytest.fail("Model must not load after a budget denial")
+    monkeypatch.setattr(runtime, "reserve_inference_attempt", denied)
+    monkeypatch.setattr(runtime, "load_model", unexpected)
+    response = runtime.handler(event(), None)
+    assert response["statusCode"] == status
+    assert "internal counter details" not in json.dumps(response)
 
 
 @pytest.mark.parametrize("mutation", [{"trainingPurpose": "pipeline_smoke_test"}, {"trainingCompleted": False},
@@ -170,3 +213,54 @@ def test_confusion_matrix_orientation_and_false_real_denominator():
     assert result["fakeRecall"] == pytest.approx(2 / 3)
     assert result["falseRealRate"] == pytest.approx(1 / 3)
     assert result["falseFakeRate"] == pytest.approx(1 / 2)
+
+
+@pytest.mark.parametrize("purpose,mode", [("pipeline_smoke_test", "research_training"),
+    ("pipeline_smoke_test", "synthetic_demo"), ("research_training", "synthetic_demo"),
+    ("synthetic_demo", "research_training")])
+def test_deployment_mode_cannot_admit_another_purpose(tmp_path, monkeypatch, purpose, mode):
+    metadata = {"schemaVersion": 1, "trainingCompleted": True, "trainingPurpose": purpose,
+                "architecture": "resnet18", "labels": DEMO_LABELS if purpose == "synthetic_demo" else LABELS,
+                "preprocessing": PREPROCESSING, "validationStatus": "synthetic_demo_only" if purpose == "synthetic_demo" else "research_only",
+                "modelVersion": "resnet18-0123456789ab", "authenticityAssessed": False,
+                "allowedImageSha256": [hashlib.sha256(png()).hexdigest()]}
+    (tmp_path / "metadata.json").write_text(json.dumps(metadata))
+    monkeypatch.setenv("MODEL_DIR", str(tmp_path))
+    monkeypatch.setenv("CLASSIFIER_DEPLOYMENT_MODE", mode)
+    assert runtime.handler(event(), None)["statusCode"] == 503
+
+
+@pytest.mark.parametrize("issue", ["template", "source", "watermark", "kind"])
+def test_synthetic_manifest_enforces_template_and_pair_boundaries(tmp_path, issue):
+    from synthetic_prescriptions import VERSION, watermark_hash
+    records = []
+    for template in range(6):
+        for label_index, label in enumerate(DEMO_LABELS):
+            image = Image.new("RGB", (900, 1200), "white")
+            image.paste((20 + template * 30, 40 + label_index * 30, 90), (300, 300, 500, 500))
+            filename = f"fixture-{template}-{label_index}.png"
+            image.save(tmp_path / filename)
+            records.append({"path": filename, "label": label, "group_id": f"source-{template}",
+                            "split": ["train", "train", "val", "val", "test", "test"][template],
+                            "verification_reference": f"synthetic://{VERSION}/test",
+                            "template_id": f"template-{template}", "source_id": f"source-{template}",
+                            "alteration_kind": "strikeout", "watermark_sha256": watermark_hash(image)})
+    path = tmp_path / "manifest.csv"
+    def save():
+        with path.open("w", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=list(records[0]))
+            writer.writeheader()
+            writer.writerows(records)
+    save()
+    assert len(load_manifest(path, "synthetic_demo")) == 12
+    if issue == "template":
+        records[4]["template_id"] = records[0]["template_id"]
+    elif issue == "source":
+        records[0]["source_id"] = "unpaired"
+    elif issue == "watermark":
+        records[0]["watermark_sha256"] = "0" * 64
+    else:
+        records[0]["alteration_kind"] = "unknown"
+    save()
+    with pytest.raises(ValueError):
+        load_manifest(path, "synthetic_demo")

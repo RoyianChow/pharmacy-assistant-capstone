@@ -1,0 +1,16 @@
+{
+  "mode": "synthetic_demo",
+  "authenticityAssessed": false,
+  "sourceId": "template-06-source-00",
+  "selection": "Fixed template 06, source 00, before model training or inference",
+  "samples": {
+    "original_demo": {
+      "file": "original.png",
+      "sha256": "010feff55813808d13c93eeec970ec99c094632d458f8ac1882182a844d65478"
+    },
+    "altered_demo": {
+      "file": "altered.png",
+      "sha256": "396e952e182efb6cd7e0aa1f17bf55cfbc41cb1fe6579c60c0656b5ec60ac289"
+    }
+  }
+}

@@ -9,6 +9,12 @@ import { parseAvailability, parsePrescriptionResponse, requestError } from "./re
 import { recordPrescriptionActivity } from "@/lib/prescription/activity";
 import ClassifierPanel from "./classifier-panel";
 
+const DEMO_IMAGES = {
+  ontario: { path: "/demo/ontario-demo-prescription.png", name: "ontario-demo-prescription.png" },
+  original: { path: "/demo/classifier/original.png", name: "classifier-original-demo.png" },
+  altered: { path: "/demo/classifier/altered.png", name: "classifier-altered-demo.png" },
+} as const;
+
 function ScanIcon({ size = 30 }: { size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M11 5H5v6m16-6h6v6M5 21v6h6m16-6v6h-6M11 11h10M11 16h10M11 21h6" /></svg>;
 }
@@ -21,7 +27,8 @@ export default function PrescriptionClient() {
   const [preview, setPreview] = useState("");
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [loadingDemo, setLoadingDemo] = useState(false);
+  const [demoBeingLoaded, setDemoBeingLoaded] = useState<keyof typeof DEMO_IMAGES | null>(null);
+  const loadingDemo = demoBeingLoaded !== null;
   const [error, setError] = useState("");
   const [result, setResult] = useState<PrescriptionResult | null>(null);
   const [compared, setCompared] = useState<Set<string>>(new Set());
@@ -65,21 +72,22 @@ export default function PrescriptionClient() {
     setFile(next); setPreview(imageUrl.current);
   }
 
-  async function loadDemo() {
+  async function loadDemo(kind: keyof typeof DEMO_IMAGES) {
     if (busy || loadingDemo) return;
-    setLoadingDemo(true); setError("");
+    setDemoBeingLoaded(kind); setError("");
     const controller = new AbortController(); demoRequest.current = controller;
     const timer = setTimeout(() => controller.abort(), 15_000);
     try {
-      const response = await fetch("/demo/ontario-demo-prescription.png", { signal: controller.signal });
+      const demo = DEMO_IMAGES[kind];
+      const response = await fetch(demo.path, { cache: "no-store", signal: controller.signal });
       if (!response.ok) throw new Error("The demo image could not be loaded. Please try again.");
       const blob = await response.blob();
       if (demoRequest.current === controller) {
-        selectFile(new File([blob], "ontario-demo-prescription.png", { type: "image/png" }));
+        selectFile(new File([blob], demo.name, { type: "image/png" }));
         if (inputRef.current) inputRef.current.value = "";
       }
     } catch { if (demoRequest.current === controller) setError("The demo image could not be loaded. Please try again."); }
-    finally { clearTimeout(timer); if (demoRequest.current === controller) { setLoadingDemo(false); demoRequest.current = null; } }
+    finally { clearTimeout(timer); if (demoRequest.current === controller) { setDemoBeingLoaded(null); demoRequest.current = null; } }
   }
 
   async function extract() {
@@ -114,8 +122,12 @@ export default function PrescriptionClient() {
     <div className="rx-workbench">
       <section className="rx-document" aria-labelledby="rx-document-title">
         <div className="rx-panel-heading"><div><p className="rx-eyebrow">THE ORIGINAL</p><h2 id="rx-document-title">Prescription image</h2></div><span className="rx-small-tag">PNG / JPEG</span></div>
-        <div className="rx-upload-controls"><label className={`rx-file-label ${busy || loadingDemo ? "is-disabled" : ""}`}><ScanIcon size={25} /><span><strong>Choose an image</strong><small>A clear, typed document · up to 4 MB</small></span><input ref={inputRef} type="file" accept="image/png,image/jpeg" disabled={busy || loadingDemo} onChange={event => selectFile(event.target.files?.[0] ?? null)} aria-label="Upload fictional prescription image" /></label><div className="rx-demo-actions"><button type="button" onClick={loadDemo} disabled={busy || loadingDemo}>{loadingDemo ? "Loading demo…" : "Load Ontario demo"}<span aria-hidden="true">↗</span></button><span><a href="/demo/ontario-demo-prescription.png" download>Demo PNG</a><a href="/demo/ontario-demo-prescription.pdf" download>Demo PDF</a></span></div></div>
-        {file && preview ? <><div className="rx-file-meta"><span><strong>{file.name}</strong><small>{(file.size / 1024).toFixed(0)} KB</small></span><button type="button" onClick={clear} disabled={busy || loadingDemo} aria-label="Remove selected prescription image">Remove</button></div><a className="rx-image-link" href={preview} target="_blank" rel="noreferrer" aria-label="Open prescription image at full size"><Image src={preview} alt="Selected fictional prescription. Open the full-size image to compare its text with the extraction." width={1200} height={1600} unoptimized /></a><p className="rx-preview-caption">Select the preview to inspect the original at full size.</p></> : <div className="rx-upload-empty"><ScanIcon size={45} /><h3>Start with the original.</h3><p>Upload a fictional prescription, or use the Ontario-style sample to try the full flow.</p><span>No real patient information</span></div>}
+        <div className="rx-upload-controls">
+          <label className={`rx-file-label ${busy || loadingDemo ? "is-disabled" : ""}`}><ScanIcon size={25} /><span><strong>Choose an image</strong><small>A clear, typed document · up to 4 MB</small></span><input ref={inputRef} type="file" accept="image/png,image/jpeg" disabled={busy || loadingDemo} onChange={event => selectFile(event.target.files?.[0] ?? null)} aria-label="Upload fictional prescription image" /></label>
+          <div className="rx-demo-actions"><button type="button" onClick={() => loadDemo("ontario")} disabled={busy || loadingDemo}>{demoBeingLoaded === "ontario" ? "Loading Ontario demo…" : "Load Ontario demo"}<span aria-hidden="true">↗</span></button><span><a href="/demo/ontario-demo-prescription.png" download>Demo PNG</a><a href="/demo/ontario-demo-prescription.pdf" download>Demo PDF</a></span></div>
+          <div className="rx-classifier-demo-actions"><p>For the synthetic alteration demo</p><div><button type="button" onClick={() => loadDemo("original")} disabled={busy || loadingDemo}>{demoBeingLoaded === "original" ? "Loading original…" : "Load original demo"}</button><button type="button" onClick={() => loadDemo("altered")} disabled={busy || loadingDemo}>{demoBeingLoaded === "altered" ? "Loading altered…" : "Load altered demo"}</button></div><small>The classifier accepts these two generated samples only. The Ontario demo above is for OCR.</small></div>
+        </div>
+        {file && preview ? <><div className="rx-file-meta"><span><strong>{file.name}</strong><small>{(file.size / 1024).toFixed(0)} KB</small></span><button type="button" onClick={clear} disabled={busy || loadingDemo} aria-label="Remove selected prescription image">Remove</button></div><a className="rx-image-link" href={preview} target="_blank" rel="noreferrer" aria-label="Open prescription image at full size"><Image src={preview} alt="Selected fictional prescription. Open the full-size image to compare its text with the extraction." width={1200} height={1600} unoptimized /></a><p className="rx-preview-caption">Select the preview to inspect the original at full size.</p></> : <div className="rx-upload-empty"><ScanIcon size={45} /><h3>Start with the original.</h3><p>Upload a fictional prescription for text extraction, or load one of the supplied demo images.</p><span>No real patient information</span></div>}
         <div className="rx-extract-controls">
           <label className="rx-consent"><input type="checkbox" checked={consent} disabled={!file || busy || loadingDemo} onChange={event => setConsent(event.target.checked)} /><span>I confirm this image contains fictional details and can be sent to the OCR or classification service when I run that feature.</span></label>
           <button type="button" className="rx-primary" onClick={extract} disabled={!file || !consent || busy || loadingDemo || !availability?.configured}>{busy ? <><i className="rx-spinner" />Extracting text…</> : <><ScanIcon size={19} />Extract with PaddleOCR</>}</button>

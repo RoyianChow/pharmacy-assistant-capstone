@@ -10,7 +10,13 @@ export class ClassifierError extends Error {
 const unavailable = () => new ClassifierError("The prescription classifier is unavailable. No prediction was made.");
 type Config = { kind: "local"; url: URL } | { kind: "aws"; region: string; functionName: string; roleArn?: string };
 
+function modelMode() {
+  const mode = process.env.PRESCRIPTION_CLASSIFIER_MODE?.trim() || "synthetic_demo";
+  return mode === "research" || mode === "synthetic_demo" ? mode : null;
+}
+
 function config(): Config | null {
+  if (!modelMode()) return null;
   const localUrl = process.env.PRESCRIPTION_CLASSIFIER_LOCAL_URL?.trim();
   if (localUrl) {
     if (process.env.NODE_ENV !== "development" || process.env.VERCEL) return null;
@@ -30,7 +36,7 @@ function config(): Config | null {
   return { kind: "aws", region, functionName, roleArn };
 }
 
-export function classifierAvailability() { return { configured: config() !== null }; }
+export function classifierAvailability() { return { configured: config() !== null, mode: modelMode() ?? "synthetic_demo" }; }
 
 async function bounded(body: ReadableStream<Uint8Array> | null, limit: number, status: number) {
   if (!body) throw new ClassifierError("An image or service response was missing.", status);
@@ -49,19 +55,25 @@ async function bounded(body: ReadableStream<Uint8Array> | null, limit: number, s
   return Buffer.concat(parts, size);
 }
 
-function unwrap(value: unknown) {
+function unwrap(value: unknown, mode: "synthetic_demo" | "research") {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw unavailable();
   const envelope = value as { statusCode?: unknown; body?: unknown };
   if (envelope.statusCode !== 200) {
+    if (envelope.statusCode === 429) throw new ClassifierError("The demo's monthly prediction limit has been reached. No prediction was made.", 429);
     if ([400, 413, 415, 422].includes(Number(envelope.statusCode))) throw new ClassifierError("The image could not be classified. Choose a clear PNG or JPEG.", Number(envelope.statusCode));
     throw unavailable();
   }
-  try { return parseClassificationResult(envelope.body); } catch { throw unavailable(); }
+  try {
+    const result = parseClassificationResult(envelope.body);
+    if ((mode === "synthetic_demo") !== (result.schemaVersion === 2)) throw unavailable();
+    return result;
+  } catch { throw unavailable(); }
 }
 
 export async function classifyPrescription(request: Request) {
   const settings = config();
-  if (!settings) throw unavailable();
+  const mode = modelMode();
+  if (!settings || !mode) throw unavailable();
   if (request.headers.get("x-demo-consent") !== "true") throw new ClassifierError("Confirm that the image contains fictional details.", 403);
   const contentType = request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() ?? "";
   if (!PRESCRIPTION_TYPES.includes(contentType)) throw new ClassifierError("Choose a PNG or JPEG image.", 415);
@@ -91,7 +103,7 @@ export async function classifyPrescription(request: Request) {
       if (response.FunctionError || response.StatusCode !== 200 || !response.Payload || response.Payload.length > 16_384) throw unavailable();
       payload = response.Payload;
     }
-    return unwrap(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(payload)));
+    return unwrap(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(payload)), mode);
   } catch (error) {
     if (error instanceof ClassifierError) throw error;
     throw unavailable();

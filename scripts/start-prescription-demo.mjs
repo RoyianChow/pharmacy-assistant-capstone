@@ -21,6 +21,7 @@ const env = {
   PRESCRIPTION_CLASSIFIER_AWS_REGION: "",
   PRESCRIPTION_CLASSIFIER_FUNCTION_NAME: "",
   PRESCRIPTION_CLASSIFIER_AWS_ROLE_ARN: "",
+  PRESCRIPTION_CLASSIFIER_MODE: "synthetic_demo",
   PRESCRIPTION_CLASSIFIER_LOCAL_URL: process.env.PRESCRIPTION_CLASSIFIER_LOCAL_URL ?? "",
 };
 // Next normalizes its development request origin to localhost; use that same

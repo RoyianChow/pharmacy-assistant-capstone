@@ -11,20 +11,39 @@ import time
 
 import numpy as np
 
-from preprocess import InputError, LABELS, MAX_BYTES, PREPROCESSING, preprocess
+from preprocess import DEMO_LABELS, InputError, LABELS, MAX_BYTES, PREPROCESSING, preprocess
+from cost_guard import CostGuardUnavailable, MonthlyLimitExceeded, reserve_inference_attempt
+
+
+@lru_cache(maxsize=1)
+def load_metadata():
+    directory = Path(os.getenv("MODEL_DIR", "/var/task/model"))
+    metadata = json.loads((directory / "metadata.json").read_text(encoding="utf-8"))
+    mode = os.getenv("CLASSIFIER_DEPLOYMENT_MODE", "research_training")
+    if mode not in {"research_training", "synthetic_demo"}:
+        raise ValueError("Unknown deployment mode.")
+    labels = DEMO_LABELS if mode == "synthetic_demo" else LABELS
+    validation = "synthetic_demo_only" if mode == "synthetic_demo" else "research_only"
+    if (metadata.get("schemaVersion") != 1 or metadata.get("trainingCompleted") is not True
+            or metadata.get("trainingPurpose") != mode
+            or metadata.get("labels") != labels or metadata.get("architecture") != "resnet18"
+            or metadata.get("preprocessing") != PREPROCESSING
+            or metadata.get("validationStatus") != validation
+            or not re.fullmatch(r"resnet18-[a-f0-9]{12}", str(metadata.get("modelVersion", "")))):
+        raise ValueError("No compatible artifact for this deployment mode.")
+    if mode == "synthetic_demo":
+        allowed = metadata.get("allowedImageSha256")
+        if (metadata.get("authenticityAssessed") is not False or not isinstance(allowed, list)
+                or not 1 <= len(allowed) <= 10000
+                or not all(isinstance(value, str) and re.fullmatch(r"[a-f0-9]{64}", value) for value in allowed)):
+            raise ValueError("A synthetic fixture allowlist is required.")
+    return metadata
 
 
 @lru_cache(maxsize=1)
 def load_model():
+    metadata = load_metadata()
     directory = Path(os.getenv("MODEL_DIR", "/var/task/model"))
-    metadata = json.loads((directory / "metadata.json").read_text(encoding="utf-8"))
-    if (metadata.get("schemaVersion") != 1 or metadata.get("trainingCompleted") is not True
-            or metadata.get("trainingPurpose") != "research_training"
-            or metadata.get("labels") != LABELS or metadata.get("architecture") != "resnet18"
-            or metadata.get("preprocessing") != PREPROCESSING
-            or metadata.get("validationStatus") != "research_only"
-            or not re.fullmatch(r"resnet18-[a-f0-9]{12}", str(metadata.get("modelVersion", "")))):
-        raise ValueError("No approved research artifact.")
     model_bytes = (directory / "model.onnx").read_bytes()
     digest = hashlib.sha256(model_bytes).hexdigest()
     if digest != metadata.get("modelSha256") or metadata["modelVersion"] != f"resnet18-{digest[:12]}":
@@ -63,17 +82,30 @@ def handler(event, _context):
         if base64.b64encode(payload).decode("ascii") != encoded:
             raise InputError(400, "The image encoding is invalid.")
         image = preprocess(payload, content_type)[None]
+        metadata = load_metadata()
+        synthetic = metadata["trainingPurpose"] == "synthetic_demo"
+        if synthetic and hashlib.sha256(payload).hexdigest() not in metadata["allowedImageSha256"]:
+            raise InputError(422, "This demo accepts only its generated fictional sample images.")
+        reserve_inference_attempt()
         session, metadata = load_model()
         logits = np.asarray(session.run(["logits"], {"image": image})[0], dtype=np.float64)
         if logits.shape != (1, 2) or not np.isfinite(logits).all():
             raise ValueError("Invalid model output.")
         scores = np.exp(logits[0] - logits.max())
         scores /= scores.sum()
-        return {"statusCode": 200, "body": {
-            "schemaVersion": 1, "modelVersion": metadata["modelVersion"],
-            "predictedLabel": "real" if scores[0] > scores[1] else "fake",
-            "scores": dict(zip(LABELS, map(float, scores))), "reviewRequired": True,
-            "validationStatus": "research_only", "durationMs": round((time.perf_counter() - started) * 1000)}}
+        labels = DEMO_LABELS if synthetic else LABELS
+        body = {"schemaVersion": 2 if synthetic else 1, "modelVersion": metadata["modelVersion"],
+                "predictedLabel": labels[0] if scores[0] > scores[1] else labels[1],
+                "scores": dict(zip(labels, map(float, scores))), "reviewRequired": True,
+                "validationStatus": "synthetic_demo_only" if synthetic else "research_only",
+                "durationMs": round((time.perf_counter() - started) * 1000)}
+        if synthetic:
+            body.update(mode="synthetic_demo", authenticityAssessed=False)
+        return {"statusCode": 200, "body": body}
+    except MonthlyLimitExceeded:
+        return {"statusCode": 429, "body": {"error": "The monthly demo request limit has been reached."}}
+    except CostGuardUnavailable:
+        return {"statusCode": 503, "body": {"error": "The classifier is temporarily unavailable."}}
     except InputError as error:
         return {"statusCode": error.status, "body": {"error": str(error)}}
     except Exception:

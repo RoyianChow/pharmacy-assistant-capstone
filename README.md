@@ -10,7 +10,7 @@ An eight-week COMP 385 capstone prototype exploring how AI agents can organize m
 - Typed prescriptions and up to six selected Canadian medication products.
 - Three agents with separate roles: intake, assessment, and verification.
 - A web application using Next.js and TypeScript, with SQLite for local demos and PostgreSQL for hosted demos.
-- The initial scope used pretrained models. The optional real/fake prescription research extension now includes a custom training pipeline; no trained authenticity model or labeled authenticity dataset is included.
+- The initial scope used pretrained models. The optional image classifier now has a synthetic document-alteration demo and custom training pipeline; no verified authenticity dataset or trained prescription-authenticity model is included.
 - One hundred synthetic cases: 60 for development and 40 held for final evaluation.
 - A human reviewer makes and records every simulated clinical decision.
 
@@ -79,11 +79,15 @@ Open [http://localhost:3001/prescriptions](http://localhost:3001/prescriptions),
 
 See [the prescription guide](docs/prescription-verification.md) for the contract, limits, testing, and future hosting setup. The Vercel app needs a separately hosted HTTPS OCR service before hosted extraction can work.
 
-### Binary prescription research model
+### Synthetic document-alteration model
 
-The prescription page also has a separate **Real / fake classifier** panel. Its server route invokes a private AWS Lambda model using Vercel OIDC, or a local Lambda runtime emulator during development. No model is connected by default, so no prediction is shown. The ResNet18 training pipeline and ONNX runtime are in `services/prescription-classifier`; deployment templates and the connection steps are in [the AWS classifier guide](docs/prescription-classifier-aws.md).
+The prescription page has a separate **Synthetic alteration demo**. Choose **Load original demo** or **Load altered demo**, acknowledge fictional data, and select **Classify demo sample**. When a compatible model is connected, it returns **Original sample** or **Altered sample** with both model scores. Only the supplied generated samples are accepted; the Ontario OCR sample remains for text extraction. Without a configured model, no prediction is shown.
 
-Training requires independently verified labels and permission to use the de-identified images. The existing fictional Ontario sample is an OCR fixture, not a labeled authenticity dataset. A model prediction is experimental evidence for a reviewer, not proof that a prescription is authorized or suitable for dispensing. OCR remains independent, and classifier results are not saved to the dashboard.
+The ResNet18/ONNX pipeline uses paired fictional documents with visible edits and held-out layouts. Public-data research did not establish a suitable verified prescription-authenticity dataset, so the demo does **not** classify real prescriptions as genuine or forged. Both classes remain invalid for dispensing, scores are not authenticity probabilities, and pharmacist verification is still required. The old real/fake research path remains untrained for authenticity. OCR is independent, and classifier details are not saved to the dashboard.
+
+The locally trained v2 model achieved 81.25% accuracy/balanced accuracy on 96 held-out synthetic images, while missing **17 of 48 altered samples** and flagging **1 of 48 originals**. This measures the generated examples only and does not establish prescription-authenticity performance.
+
+The server supports local Lambda emulation and private AWS invocation using Vercel OIDC. `PRESCRIPTION_CLASSIFIER_MODE` defaults to `synthetic_demo`. The AWS plan targets **under US$5/month** with local training, a 500-attempt monthly counter, and small serverless resources; this is not a hard account spending cap. JavaScript tests (151), Python tests (86), final lint/build, updated stack lint, real Docker inference, and the browser flow passed, including supplied samples, wrong-image rejection, consent/result clearing, and independent OCR. AWS sign-in and deployment remain pending; no AWS resources have been created for this update. See [the classifier guide](docs/prescription-classifier-aws.md) for the dataset search, setup, cost assumptions, and current validation status, and [the model service guide](services/prescription-classifier/README.md) for reproduction commands.
 
 ## Project map
 

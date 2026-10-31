@@ -1,6 +1,6 @@
 {
   "AWSTemplateFormatVersion": "2010-09-09",
-  "Description": "Private Lambda research classifier with production-only Vercel OIDC access; no public URL.",
+  "Description": "Private synthetic-demo classifier with production-only Vercel OIDC access and 500 monthly inference attempts; no public URL.",
   "Parameters": {
     "ImageUri": {
       "Type": "String",
@@ -39,6 +39,28 @@
     }
   },
   "Resources": {
+    "UsageTable": {
+      "Type": "AWS::DynamoDB::Table",
+      "Properties": {
+        "BillingMode": "PAY_PER_REQUEST",
+        "AttributeDefinitions": [
+          {
+            "AttributeName": "pk",
+            "AttributeType": "S"
+          }
+        ],
+        "KeySchema": [
+          {
+            "AttributeName": "pk",
+            "KeyType": "HASH"
+          }
+        ],
+        "TimeToLiveSpecification": {
+          "AttributeName": "expiresAt",
+          "Enabled": true
+        }
+      }
+    },
     "LogGroup": {
       "Type": "AWS::Logs::LogGroup",
       "Properties": {
@@ -84,6 +106,24 @@
                 }
               ]
             }
+          },
+          {
+            "PolicyName": "IncrementOnlyOwnUsageCounter",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": "dynamodb:UpdateItem",
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "UsageTable",
+                      "Arn"
+                    ]
+                  }
+                }
+              ]
+            }
           }
         ]
       }
@@ -112,6 +152,15 @@
         "MemorySize": 1024,
         "Timeout": 30,
         "ReservedConcurrentExecutions": 2,
+        "Environment": {
+          "Variables": {
+            "CLASSIFIER_DEPLOYMENT_MODE": "synthetic_demo",
+            "CLASSIFIER_USAGE_TABLE": {
+              "Ref": "UsageTable"
+            },
+            "CLASSIFIER_MONTHLY_MAX_CALLS": "500"
+          }
+        },
         "EphemeralStorage": {
           "Size": 512
         }

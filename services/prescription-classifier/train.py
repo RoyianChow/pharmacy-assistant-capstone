@@ -15,12 +15,13 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision.models import ResNet18_Weights, resnet18
 
 from manifest import load_manifest
-from preprocess import LABELS, PREPROCESSING, preprocess
+from preprocess import DEMO_LABELS, LABELS, PREPROCESSING, preprocess
 
 
 class Images(Dataset):
-    def __init__(self, records):
+    def __init__(self, records, labels=LABELS):
         self.records = records
+        self.labels = labels
 
     def __len__(self):
         return len(self.records)
@@ -30,25 +31,31 @@ class Images(Dataset):
         payload = record["file"].read_bytes()
         if hashlib.sha256(payload).hexdigest() != record["sha256"]:
             raise ValueError("A dataset image changed after validation.")
-        return torch.from_numpy(preprocess(payload, record["mime"])), LABELS.index(record["label"])
+        return torch.from_numpy(preprocess(payload, record["mime"])), self.labels.index(record["label"])
 
 
-def metrics(truth, predictions):
+def metrics(truth, predictions, labels=LABELS):
     matrix = [[0, 0], [0, 0]]
     for actual, predicted in zip(truth, predictions):
         matrix[int(actual)][int(predicted)] += 1
     fake_count = sum(matrix[1])
-    return {"labels": LABELS, "matrixRowsActualColumnsPredicted": matrix, "sampleCount": len(truth),
+    report = {"labels": labels, "matrixRowsActualColumnsPredicted": matrix, "sampleCount": len(truth),
             "fakeRecall": matrix[1][1] / fake_count, "falseRealRate": matrix[1][0] / fake_count,
             "falseFakeRate": matrix[0][1] / sum(matrix[0]),
+            "balancedAccuracy": (matrix[0][0] / sum(matrix[0]) + matrix[1][1] / fake_count) / 2,
             "accuracy": (matrix[0][0] + matrix[1][1]) / len(truth)}
+    if labels == DEMO_LABELS:
+        report["alteredRecall"] = report.pop("fakeRecall")
+        report["falseOriginalRate"] = report.pop("falseRealRate")
+        report["originalFalseAlarmRate"] = report.pop("falseFakeRate")
+    return report
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--purpose", choices=["research_training", "pipeline_smoke_test"], required=True)
+    parser.add_argument("--purpose", choices=["research_training", "pipeline_smoke_test", "synthetic_demo"], required=True)
     parser.add_argument("--approval-reference", required=True, help="Dataset rights/label-review record; never patient details")
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--patience", type=int, default=3)
@@ -63,12 +70,13 @@ def main():
     if any((args.output / name).exists() for name in ["model.onnx", "metadata.json", "metrics.json"]):
         parser.error("Use a new output location; existing artifacts are never overwritten.")
     rows = load_manifest(args.manifest, args.purpose)
+    labels = DEMO_LABELS if args.purpose == "synthetic_demo" else LABELS
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     torch.set_num_threads(2)
     torch.use_deterministic_algorithms(True)
-    datasets = {split: Images([row for row in rows if row["split"] == split]) for split in ["train", "val", "test"]}
+    datasets = {split: Images([row for row in rows if row["split"] == split], labels) for split in ["train", "val", "test"]}
     generator = torch.Generator().manual_seed(args.seed)
     loaders = {split: DataLoader(data, batch_size=args.batch_size, shuffle=split == "train", num_workers=0,
                                 generator=generator if split == "train" else None) for split, data in datasets.items()}
@@ -77,7 +85,7 @@ def main():
         parameter.requires_grad = False
     model.fc = torch.nn.Linear(model.fc.in_features, 2)
     optimizer = torch.optim.AdamW(model.fc.parameters(), lr=1e-3)
-    counts = [sum(row["label"] == label and row["split"] == "train" for row in rows) for label in LABELS]
+    counts = [sum(row["label"] == label and row["split"] == "train" for row in rows) for label in labels]
     class_weights = torch.tensor([sum(counts) / (2 * count) for count in counts])
     loss_function = torch.nn.CrossEntropyLoss(weight=class_weights)
     validation_loss_function = torch.nn.CrossEntropyLoss(weight=class_weights, reduction="sum")
@@ -85,17 +93,17 @@ def main():
     for epoch in range(1, args.epochs + 1):
         model.eval()  # Frozen backbone BatchNorm statistics must stay unchanged.
         model.fc.train()
-        for images, labels in loaders["train"]:
+        for images, targets in loaders["train"]:
             optimizer.zero_grad()
-            loss = loss_function(model(images), labels)
+            loss = loss_function(model(images), targets)
             loss.backward()
             optimizer.step()
         model.eval()
         with torch.inference_mode():
             weighted_loss, weight_sum = 0.0, 0.0
-            for images, labels in loaders["val"]:
-                weighted_loss += float(validation_loss_function(model(images), labels))
-                weight_sum += float(class_weights[labels].sum())
+            for images, targets in loaders["val"]:
+                weighted_loss += float(validation_loss_function(model(images), targets))
+                weight_sum += float(class_weights[targets].sum())
             validation_loss = weighted_loss / weight_sum
         if not np.isfinite(validation_loss):
             raise ValueError("Non-finite validation loss.")
@@ -128,16 +136,31 @@ def main():
             actual = session.run(["logits"], {"image": image.numpy()})[0]
             np.testing.assert_allclose(actual, expected, rtol=1e-4, atol=1e-4)
             parity_error = max(parity_error, float(np.abs(actual - expected).max()))
-    truth, predictions = [], []
+    truth, predictions, altered_scores = [], [], []
     for image, label in datasets["test"]:  # Exactly one final pass using the exported artifact.
         logits = session.run(["logits"], {"image": image.unsqueeze(0).numpy()})[0]
         if not np.isfinite(logits).all():
             raise ValueError("Non-finite test logits.")
         truth.append(label)
         predictions.append(0 if logits[0, 0] > logits[0, 1] else 1)
-    report = metrics(truth, predictions)
+        probabilities = np.exp(logits[0] - logits.max())
+        altered_scores.append(float(probabilities[1] / probabilities.sum()))
+    report = metrics(truth, predictions, labels)
+    if args.purpose == "synthetic_demo":
+        test_rows = datasets["test"].records
+        report["evaluationScope"] = "Two held-out template IDs from one synthetic generator; shared typography, field structure, and edit families. Not authenticity validation."
+        for field, key in [("template_id", "byTemplate"), ("alteration_kind", "byAlteration")]:
+            report[key] = {}
+            for value in sorted({row[field] for row in test_rows}):
+                selected = [i for i, row in enumerate(test_rows) if row[field] == value]
+                report[key][value] = metrics([truth[i] for i in selected], [predictions[i] for i in selected], labels)
+        paired = {}
+        for row, score in zip(test_rows, altered_scores):
+            paired.setdefault(row["source_id"], {})[row["label"]] = score
+        report["pairCount"] = len(paired)
+        report["pairedScoreOrderingRate"] = sum(pair["altered_demo"] > pair["original_demo"] for pair in paired.values()) / len(paired)
     digest = hashlib.sha256(model_path.read_bytes()).hexdigest()
-    metadata = {"schemaVersion": 1, "architecture": "resnet18", "labels": LABELS,
+    metadata = {"schemaVersion": 1, "architecture": "resnet18", "labels": labels,
                 "preprocessing": PREPROCESSING, "modelSha256": digest, "modelVersion": f"resnet18-{digest[:12]}",
                 "trainingCompleted": True, "trainingPurpose": args.purpose, "validationStatus": "research_only",
                 "initialWeights": "none" if args.no_pretrained else "ResNet18_Weights.IMAGENET1K_V1",
@@ -149,6 +172,14 @@ def main():
                 "seed": args.seed, "epochsRun": epoch, "bestEpoch": best_epoch, "bestValidationLoss": best_loss,
                 "splitCounts": {split: len(data) for split, data in datasets.items()}, "heldOutMetrics": report,
                 "onnxParityMaxAbsoluteError": parity_error, "completedAt": datetime.now(timezone.utc).isoformat()}
+    if args.purpose == "synthetic_demo":
+        generation = json.loads((args.manifest.parent / "generation.json").read_text(encoding="utf-8"))
+        metadata.update(validationStatus="synthetic_demo_only", authenticityAssessed=False,
+                        task="Detect controlled visible edits in generated fictional documents only",
+                        allowedImageSha256=sorted(row["sha256"] for row in rows if row["split"] == "test"),
+                        generator=generation, templateCounts={split: len({row["template_id"] for row in rows if row["split"] == split})
+                                                            for split in ["train", "val", "test"]},
+                        labelDefinitions={"original_demo": "Unmodified fictional source", "altered_demo": "Source with a controlled visible edit"})
     (args.output / "metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     (args.output / "metrics.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(json.dumps({"modelVersion": metadata["modelVersion"], "trainingPurpose": args.purpose,

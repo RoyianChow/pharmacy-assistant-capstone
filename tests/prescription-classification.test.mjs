@@ -53,7 +53,7 @@ const { classifierAvailability } = await import(service);
 const { MAX_PRESCRIPTION_BYTES } = await import(types);
 const LOCAL_URL = "http://127.0.0.1:9000/2015-03-31/functions/function/invocations";
 const ROLE = "arn:aws:iam::123456789012:role/pharmacy-test-invoke";
-const environmentKeys = ["NODE_ENV", "VERCEL", "PRESCRIPTION_CLASSIFIER_LOCAL_URL", "PRESCRIPTION_CLASSIFIER_AWS_REGION", "PRESCRIPTION_CLASSIFIER_FUNCTION_NAME", "PRESCRIPTION_CLASSIFIER_AWS_ROLE_ARN"];
+const environmentKeys = ["PRESCRIPTION_CLASSIFIER_MODE", "NODE_ENV", "VERCEL", "PRESCRIPTION_CLASSIFIER_LOCAL_URL", "PRESCRIPTION_CLASSIFIER_AWS_REGION", "PRESCRIPTION_CLASSIFIER_FUNCTION_NAME", "PRESCRIPTION_CLASSIFIER_AWS_ROLE_ARN"];
 let originalEnvironment;
 let originalFetch;
 let fetchCalls;
@@ -64,6 +64,7 @@ beforeEach(() => {
   originalFetch = globalThis.fetch;
   for (const key of environmentKeys) delete process.env[key];
   process.env.NODE_ENV = "development";
+  process.env.PRESCRIPTION_CLASSIFIER_MODE = "research";
   process.env.PRESCRIPTION_CLASSIFIER_LOCAL_URL = LOCAL_URL;
   fetchCalls = [];
   state = globalThis.__rxClassificationTest = {
@@ -94,6 +95,11 @@ function awsConfig({ hosted = true, role = true } = {}) {
 }
 function result(overrides = {}) {
   return { schemaVersion: 1, modelVersion: "rx-resnet18-test-v1", predictedLabel: "fake", scores: { real: 0.2, fake: 0.8 }, reviewRequired: true, validationStatus: "research_only", durationMs: 23, ...overrides };
+}
+function demoResult(overrides = {}) {
+  return { schemaVersion: 2, mode: "synthetic_demo", modelVersion: "rx-synthetic-test-v1", predictedLabel: "altered_demo",
+    scores: { original_demo: 0.2, altered_demo: 0.8 }, reviewRequired: true, validationStatus: "synthetic_demo_only",
+    authenticityAssessed: false, durationMs: 23, ...overrides };
 }
 const envelope = (body = result(), statusCode = 200) => ({ statusCode, body });
 const payload = value => Buffer.from(JSON.stringify(value));
@@ -126,7 +132,7 @@ test("classification and availability return only validated public fields", () =
   const source = result({ patient: "private-patient", providerDiagnostic: "secret-token", scores: { real: 0.2, fake: 0.8, rawImage: "private-patient" } });
   assert.deepEqual(parseClassificationResult(source), result());
   assert.deepEqual(parseClassificationResult(result({ predictedLabel: "real", scores: { real: 0.8, fake: 0.2 } })).predictedLabel, "real");
-  assert.deepEqual(parseClassifierAvailability({ configured: true, endpoint: "secret-token" }), { configured: true });
+  assert.deepEqual(parseClassifierAvailability({ configured: true, endpoint: "secret-token" }), { configured: true, mode: "research" });
   for (const invalid of [null, [], {}, { configured: "true" }]) assert.throws(() => parseClassifierAvailability(invalid));
 });
 
@@ -139,45 +145,82 @@ test("malformed scores, labels, model versions and review status cannot become p
   for (const value of invalid) assert.throws(() => parseClassificationResult(value));
 });
 
+test("synthetic results cannot masquerade as authenticity assessments", () => {
+  assert.deepEqual(parseClassificationResult(demoResult({ patient: "private-patient" })), demoResult());
+  assert.equal(parseClassificationResult(demoResult({ predictedLabel: "original_demo", scores: { original_demo: 0.8, altered_demo: 0.2 } })).predictedLabel, "original_demo");
+  assert.equal(parseClassificationResult(demoResult({ scores: { original_demo: 0.5, altered_demo: 0.5 } })).predictedLabel, "altered_demo");
+  for (const update of [
+    { authenticityAssessed: true }, { authenticityAssessed: undefined }, { mode: "research" },
+    { predictedLabel: "real" }, { validationStatus: "research_only" }, { reviewRequired: false },
+    { scores: { original_demo: 0.2, altered_demo: 0.7 } }, { predictedLabel: "original_demo" },
+  ]) assert.throws(() => parseClassificationResult(demoResult(update)));
+  assert.deepEqual(parseClassifierAvailability({ configured: true, mode: "synthetic_demo", secret: "hidden" }), { configured: true, mode: "synthetic_demo" });
+  assert.throws(() => parseClassifierAvailability({ configured: true, mode: "clinically_validated" }));
+});
+
+test("synthetic mode is the default and responses must match the configured task", async () => {
+  delete process.env.PRESCRIPTION_CLASSIFIER_MODE;
+  assert.deepEqual(classifierAvailability(), { configured: true, mode: "synthetic_demo" });
+  mockFetch(() => Response.json(envelope(demoResult())));
+  assert.deepEqual(await (await route.POST(upload())).json(), demoResult());
+  mockFetch(() => Response.json(envelope(result())));
+  await assertNoPrediction(await route.POST(upload()));
+  process.env.PRESCRIPTION_CLASSIFIER_MODE = "research";
+  mockFetch(() => Response.json(envelope(demoResult())));
+  await assertNoPrediction(await route.POST(upload()));
+  process.env.PRESCRIPTION_CLASSIFIER_MODE = "invalid";
+  assert.equal(classifierAvailability().configured, false);
+  const priorCalls = fetchCalls.length;
+  await assertNoPrediction(await route.POST(upload()));
+  assert.equal(fetchCalls.length, priorCalls);
+});
+
+test("monthly inference limit returns a private 429 with no prediction", async () => {
+  process.env.PRESCRIPTION_CLASSIFIER_MODE = "synthetic_demo";
+  mockFetch(() => Response.json(envelope({ error: "private-provider-detail" }, 429)));
+  await assertNoPrediction(await route.POST(upload()), 429);
+  assert.equal(fetchCalls.length, 1);
+});
+
 test("local classification accepts only the exact loopback RIE path in development", () => {
   for (const host of ["127.0.0.1", "localhost", "[::1]"]) {
     process.env.PRESCRIPTION_CLASSIFIER_LOCAL_URL = `http://${host}:9000/2015-03-31/functions/function/invocations`;
-    assert.deepEqual(classifierAvailability(), { configured: true });
+    assert.deepEqual(classifierAvailability(), { configured: true, mode: "research" });
   }
   for (const url of ["broken", "https://localhost:9000/2015-03-31/functions/function/invocations", "http://example.com:9000/2015-03-31/functions/function/invocations", "http://user:secret@localhost:9000/2015-03-31/functions/function/invocations", `${LOCAL_URL}?token=secret`, `${LOCAL_URL}#fragment`, `${LOCAL_URL}/`, "http://localhost:9000/ocr"]) {
     process.env.PRESCRIPTION_CLASSIFIER_LOCAL_URL = url;
-    assert.deepEqual(classifierAvailability(), { configured: false }, url);
+    assert.deepEqual(classifierAvailability(), { configured: false, mode: "research" }, url);
   }
   process.env.PRESCRIPTION_CLASSIFIER_LOCAL_URL = LOCAL_URL;
   process.env.NODE_ENV = "production";
-  assert.deepEqual(classifierAvailability(), { configured: false });
+  assert.deepEqual(classifierAvailability(), { configured: false, mode: "research" });
   process.env.NODE_ENV = "development";
   process.env.VERCEL = "1";
-  assert.deepEqual(classifierAvailability(), { configured: false });
+  assert.deepEqual(classifierAvailability(), { configured: false, mode: "research" });
   assertNoInference();
 });
 
 test("AWS configuration is fail-closed for partial or malformed hosted settings", async () => {
   delete process.env.PRESCRIPTION_CLASSIFIER_LOCAL_URL;
-  assert.deepEqual(classifierAvailability(), { configured: false });
+  assert.deepEqual(classifierAvailability(), { configured: false, mode: "research" });
   process.env.PRESCRIPTION_CLASSIFIER_AWS_REGION = "ca-central-1";
-  assert.deepEqual(classifierAvailability(), { configured: false });
+  assert.deepEqual(classifierAvailability(), { configured: false, mode: "research" });
   awsConfig({ role: false });
-  assert.deepEqual(classifierAvailability(), { configured: false });
+  assert.deepEqual(classifierAvailability(), { configured: false, mode: "research" });
   process.env.PRESCRIPTION_CLASSIFIER_AWS_ROLE_ARN = ROLE;
-  assert.deepEqual(classifierAvailability(), { configured: true });
+  assert.deepEqual(classifierAvailability(), { configured: true, mode: "research" });
   for (const [key, value] of [
     ["PRESCRIPTION_CLASSIFIER_AWS_REGION", "not-a-region"], ["PRESCRIPTION_CLASSIFIER_FUNCTION_NAME", "name/with/path"],
     ["PRESCRIPTION_CLASSIFIER_FUNCTION_NAME", "x".repeat(65)], ["PRESCRIPTION_CLASSIFIER_AWS_ROLE_ARN", "arn:aws:iam::123:role/test"],
   ]) {
     const prior = process.env[key]; process.env[key] = value;
-    assert.deepEqual(classifierAvailability(), { configured: false });
+    assert.deepEqual(classifierAvailability(), { configured: false, mode: "research" });
     process.env[key] = prior;
   }
   process.env.PRESCRIPTION_CLASSIFIER_LOCAL_URL = LOCAL_URL;
   const availability = await route.GET();
   assertPrivate(availability);
-  assert.deepEqual(await availability.json(), { configured: false });
+  assert.deepEqual(await availability.json(), { configured: false, mode: "research" });
   await assertNoPrediction(await route.POST(upload()));
   assertNoInference();
 });

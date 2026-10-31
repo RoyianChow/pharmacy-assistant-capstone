@@ -6,6 +6,7 @@ import numpy as np
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 LABELS = ["real", "fake"]
+DEMO_LABELS = ["original_demo", "altered_demo"]
 PREPROCESSING = "rgb-exif-white-letterbox224-bilinear-imagenet-v1"
 MAX_BYTES = 4 * 1024 * 1024
 MAX_PIXELS = 16_000_000
