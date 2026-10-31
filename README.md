@@ -10,7 +10,7 @@ An eight-week COMP 385 capstone prototype exploring how AI agents can organize m
 - Typed prescriptions and up to six selected Canadian medication products.
 - Three agents with separate roles: intake, assessment, and verification.
 - A web application using Next.js and TypeScript, with SQLite for local demos and PostgreSQL for hosted demos.
-- One pretrained model; no model training or fine-tuning.
+- The initial scope used pretrained models. The optional real/fake prescription research extension now includes a custom training pipeline; no trained authenticity model or labeled authenticity dataset is included.
 - One hundred synthetic cases: 60 for development and 40 held for final evaluation.
 - A human reviewer makes and records every simulated clinical decision.
 
@@ -78,6 +78,12 @@ npm.cmd run dev:prescriptions
 Open [http://localhost:3001/prescriptions](http://localhost:3001/prescriptions), choose **Load Ontario demo**, acknowledge fictional data, and select **Extract with PaddleOCR**. Use `localhost` as shown so the browser origin matches Next.js development requests. This launcher uses the existing local demo access mode and a separate local database path; it leaves `.env.local` and hosted settings unchanged. The Python service runs locally on port 8001 and needs no API key. First startup downloads the models.
 
 See [the prescription guide](docs/prescription-verification.md) for the contract, limits, testing, and future hosting setup. The Vercel app needs a separately hosted HTTPS OCR service before hosted extraction can work.
+
+### Binary prescription research model
+
+The prescription page also has a separate **Real / fake classifier** panel. Its server route invokes a private AWS Lambda model using Vercel OIDC, or a local Lambda runtime emulator during development. No model is connected by default, so no prediction is shown. The ResNet18 training pipeline and ONNX runtime are in `services/prescription-classifier`; deployment templates and the connection steps are in [the AWS classifier guide](docs/prescription-classifier-aws.md).
+
+Training requires independently verified labels and permission to use the de-identified images. The existing fictional Ontario sample is an OCR fixture, not a labeled authenticity dataset. A model prediction is experimental evidence for a reviewer, not proof that a prescription is authorized or suitable for dispensing. OCR remains independent, and classifier results are not saved to the dashboard.
 
 ## Project map
 

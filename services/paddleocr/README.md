@@ -52,7 +52,13 @@ docker build -t pharmacy-paddleocr services/paddleocr
 docker run --rm -p 127.0.0.1:8001:8001 --env PADDLEOCR_SERVICE_TOKEN pharmacy-paddleocr
 ```
 
-The image predownloads the pinned model pair during build and runs as a non-root user. Set a strong service token in the hosting platform's secret manager, supply the same value to the Next.js server, and expose the container only through an authenticated HTTPS endpoint. Keep model downloads permitted while building the image. Set request/body/time limits at the reverse proxy as well. Do not publish an unauthenticated OCR service.
+The image predownloads the pinned model pair during build and runs as the non-root `ocr` user (UID 10001). Its home and application directory are created with the correct ownership before model initialization. Runtime model-host connectivity checks are disabled because the weights are already bundled; rebuilding still needs access to the package and model hosts.
+
+Set `PADDLEOCR_SERVICE_TOKEN` in the calling shell before `docker run`; the `--env` option above passes its value without including it in the command arguments. For hosted deployments use the platform's secret manager, supply the same value to the Next.js server, and expose the container only through an authenticated HTTPS endpoint. Set request/body/time limits at the reverse proxy as well. Do not publish an unauthenticated OCR service.
+
+To test alongside a local service already using port 8001, publish `127.0.0.1:8002:8001` instead and run the existing smoke test with `--url http://127.0.0.1:8002`. The smoke test must inherit the same service token. `/health` intentionally needs no token so container health checks can run; `/ocr` requires the token for the container's non-loopback bind.
+
+Local container validation passed on Docker Desktop Linux/amd64 with `--cpus 2 --memory 2g --cap-drop ALL --security-opt no-new-privileges`: the health endpoint became ready in 6.02 seconds, Docker reported `healthy`, and the fictional 1700 x 2200 Ontario PNG produced 30 OCR lines in 13,915 ms with every expected demo label found. Missing and incorrect tokens returned 401. The process ran as UID 10001, `pip check` found no broken requirements, and memory after inference was 424.9 MiB. These are single-document local observations, not peak-memory or hosted-performance guarantees. The tested image occupied 1,663,184,572 bytes (about 1.55 GiB); the temporary test containers were stopped and removed after validation.
 
 ## Versions and model choice
 

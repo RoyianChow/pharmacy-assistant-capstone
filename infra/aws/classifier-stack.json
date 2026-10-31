@@ -1,0 +1,198 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Private Lambda research classifier with production-only Vercel OIDC access; no public URL.",
+  "Parameters": {
+    "ImageUri": {
+      "Type": "String",
+      "Description": "Same-region ECR image pinned by SHA256 digest.",
+      "AllowedPattern": "[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com/[a-z0-9/_-]+@sha256:[a-f0-9]{64}"
+    },
+    "FunctionName": {
+      "Type": "String",
+      "Default": "pharmacy-prescription-classifier",
+      "AllowedPattern": "[a-zA-Z0-9_-]{1,64}"
+    },
+    "VercelTeamSlug": {
+      "Type": "String",
+      "AllowedPattern": "[a-z0-9-]{1,100}"
+    },
+    "VercelProjectName": {
+      "Type": "String",
+      "Default": "pharmacy-assistant-capstone",
+      "AllowedPattern": "[a-z0-9-]{1,100}"
+    },
+    "ExistingOidcProviderArn": {
+      "Type": "String",
+      "Default": "",
+      "Description": "Reuse the team's existing AWS OIDC provider if present. Empty creates a new team-issuer provider.",
+      "AllowedPattern": "^$|^arn:aws:iam::[0-9]{12}:oidc-provider/oidc\\.vercel\\.com/[a-z0-9-]+$"
+    }
+  },
+  "Conditions": {
+    "CreateOidcProvider": {
+      "Fn::Equals": [
+        {
+          "Ref": "ExistingOidcProviderArn"
+        },
+        ""
+      ]
+    }
+  },
+  "Resources": {
+    "LogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": {
+          "Fn::Sub": "/aws/lambda/${FunctionName}"
+        },
+        "RetentionInDays": 7
+      }
+    },
+    "ExecutionRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "WriteOnlyOwnLogs",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "LogGroup",
+                      "Arn"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "Classifier": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": {
+          "Ref": "FunctionName"
+        },
+        "PackageType": "Image",
+        "Code": {
+          "ImageUri": {
+            "Ref": "ImageUri"
+          }
+        },
+        "Role": {
+          "Fn::GetAtt": [
+            "ExecutionRole",
+            "Arn"
+          ]
+        },
+        "Architectures": [
+          "x86_64"
+        ],
+        "MemorySize": 1024,
+        "Timeout": 30,
+        "ReservedConcurrentExecutions": 2,
+        "EphemeralStorage": {
+          "Size": 512
+        }
+      }
+    },
+    "OidcProvider": {
+      "Type": "AWS::IAM::OIDCProvider",
+      "Condition": "CreateOidcProvider",
+      "Properties": {
+        "Url": {
+          "Fn::Sub": "https://oidc.vercel.com/${VercelTeamSlug}"
+        },
+        "ClientIdList": [
+          {
+            "Fn::Sub": "https://vercel.com/${VercelTeamSlug}"
+          }
+        ]
+      }
+    },
+    "VercelInvokeRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Fn::Sub": [
+            "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Federated\":\"${ProviderArn}\"},\"Action\":\"sts:AssumeRoleWithWebIdentity\",\"Condition\":{\"StringEquals\":{\"oidc.vercel.com/${VercelTeamSlug}:aud\":\"https://vercel.com/${VercelTeamSlug}\",\"oidc.vercel.com/${VercelTeamSlug}:sub\":\"owner:${VercelTeamSlug}:project:${VercelProjectName}:environment:production\"}}}]}",
+            {
+              "ProviderArn": {
+                "Fn::If": [
+                  "CreateOidcProvider",
+                  {
+                    "Ref": "OidcProvider"
+                  },
+                  {
+                    "Ref": "ExistingOidcProviderArn"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "InvokeOnlyPrescriptionClassifier",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": "lambda:InvokeFunction",
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "Classifier",
+                      "Arn"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "FunctionName": {
+      "Value": {
+        "Ref": "Classifier"
+      }
+    },
+    "AwsRegion": {
+      "Value": {
+        "Ref": "AWS::Region"
+      }
+    },
+    "VercelRoleArn": {
+      "Value": {
+        "Fn::GetAtt": [
+          "VercelInvokeRole",
+          "Arn"
+        ]
+      }
+    }
+  }
+}

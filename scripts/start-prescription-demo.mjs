@@ -17,6 +17,11 @@ const env = {
   PHARMACY_DATABASE_PATH: "./data/prescription-demo.sqlite",
   PADDLEOCR_SERVICE_URL: "http://127.0.0.1:8001",
   PADDLEOCR_SERVICE_TOKEN: process.env.PADDLEOCR_SERVICE_TOKEN ?? "",
+  // Keep this isolated demo from silently invoking a saved hosted classifier.
+  PRESCRIPTION_CLASSIFIER_AWS_REGION: "",
+  PRESCRIPTION_CLASSIFIER_FUNCTION_NAME: "",
+  PRESCRIPTION_CLASSIFIER_AWS_ROLE_ARN: "",
+  PRESCRIPTION_CLASSIFIER_LOCAL_URL: process.env.PRESCRIPTION_CLASSIFIER_LOCAL_URL ?? "",
 };
 // Next normalizes its development request origin to localhost; use that same
 // browser hostname so the existing same-origin protection stays intact.

@@ -1,0 +1,11 @@
+.venv/
+.runtime/
+.pytest_cache/
+__pycache__/
+data/
+artifacts/*
+!artifacts/.gitkeep
+*.onnx
+*.pt
+*.pth
+*.log

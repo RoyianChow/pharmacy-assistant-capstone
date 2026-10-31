@@ -7,6 +7,7 @@ import SiteBrand from "../components/site-brand";
 import { MAX_PRESCRIPTION_BYTES, PRESCRIPTION_TYPES, type PrescriptionAvailability, type PrescriptionResult } from "@/lib/prescription/types";
 import { parseAvailability, parsePrescriptionResponse, requestError } from "./response";
 import { recordPrescriptionActivity } from "@/lib/prescription/activity";
+import ClassifierPanel from "./classifier-panel";
 
 function ScanIcon({ size = 30 }: { size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 32 32" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M11 5H5v6m16-6h6v6M5 21v6h6m16-6v6h-6M11 11h10M11 16h10M11 21h6" /></svg>;
@@ -116,7 +117,7 @@ export default function PrescriptionClient() {
         <div className="rx-upload-controls"><label className={`rx-file-label ${busy || loadingDemo ? "is-disabled" : ""}`}><ScanIcon size={25} /><span><strong>Choose an image</strong><small>A clear, typed document · up to 4 MB</small></span><input ref={inputRef} type="file" accept="image/png,image/jpeg" disabled={busy || loadingDemo} onChange={event => selectFile(event.target.files?.[0] ?? null)} aria-label="Upload fictional prescription image" /></label><div className="rx-demo-actions"><button type="button" onClick={loadDemo} disabled={busy || loadingDemo}>{loadingDemo ? "Loading demo…" : "Load Ontario demo"}<span aria-hidden="true">↗</span></button><span><a href="/demo/ontario-demo-prescription.png" download>Demo PNG</a><a href="/demo/ontario-demo-prescription.pdf" download>Demo PDF</a></span></div></div>
         {file && preview ? <><div className="rx-file-meta"><span><strong>{file.name}</strong><small>{(file.size / 1024).toFixed(0)} KB</small></span><button type="button" onClick={clear} disabled={busy || loadingDemo} aria-label="Remove selected prescription image">Remove</button></div><a className="rx-image-link" href={preview} target="_blank" rel="noreferrer" aria-label="Open prescription image at full size"><Image src={preview} alt="Selected fictional prescription. Open the full-size image to compare its text with the extraction." width={1200} height={1600} unoptimized /></a><p className="rx-preview-caption">Select the preview to inspect the original at full size.</p></> : <div className="rx-upload-empty"><ScanIcon size={45} /><h3>Start with the original.</h3><p>Upload a fictional prescription, or use the Ontario-style sample to try the full flow.</p><span>No real patient information</span></div>}
         <div className="rx-extract-controls">
-          <label className="rx-consent"><input type="checkbox" checked={consent} disabled={!file || busy || loadingDemo} onChange={event => setConsent(event.target.checked)} /><span>I confirm this image contains fictional details and can be sent to the OCR service for this demo.</span></label>
+          <label className="rx-consent"><input type="checkbox" checked={consent} disabled={!file || busy || loadingDemo} onChange={event => setConsent(event.target.checked)} /><span>I confirm this image contains fictional details and can be sent to the OCR or classification service when I run that feature.</span></label>
           <button type="button" className="rx-primary" onClick={extract} disabled={!file || !consent || busy || loadingDemo || !availability?.configured}>{busy ? <><i className="rx-spinner" />Extracting text…</> : <><ScanIcon size={19} />Extract with PaddleOCR</>}</button>
           <p className="rx-retention-note">Images and extracted fields are not saved to the case dashboard. Only scan counts and timing are kept in this browser tab for the dashboard overview. Comparison marks clear when you select another image or leave this page.</p>
         </div>
@@ -137,6 +138,7 @@ export default function PrescriptionClient() {
         </> : <div className="rx-results-empty"><div className="rx-empty-art"><ScanIcon size={46} /><span aria-hidden="true">Aa</span></div><p className="rx-eyebrow">DETAILS WORTH DOUBLE-CHECKING</p><h3>The document, made easier to read.</h3><p>Extracted patient, prescriber, and medication fields will appear here alongside confidence scores and missing-field notices.</p><div className="rx-empty-fields"><span>Patient details</span><span>Prescriber details</span><span>Medication & directions</span></div><p className="rx-empty-footnote">Handwriting, image quality, and unusual layouts can affect recognition. Always compare with the original.</p></div>}
       </section>
     </div>
+    <ClassifierPanel key={preview || "no-image"} file={file} consent={consent} disabled={busy || loadingDemo} />
     <footer className="rx-footer"><span>Pharmacy Assistant / Capstone demonstration</span><span>Fictional documents · Human review required</span></footer>
   </main>;
 }
