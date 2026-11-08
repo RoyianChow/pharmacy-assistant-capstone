@@ -107,13 +107,4 @@ See [docs/architecture.md](docs/architecture.md) for the planned workflow and [d
 
 ## Development plan
 
-1. Confirm scope, sources, products, and requirements.
-2. Build forms, database structure, and labelled synthetic cases.
-3. Add intake extraction and missing-information handling.
-4. Add the two assessment pathways and four result types.
-5. Add supported prescription checks with linked sources.
-6. Connect the workflows, review screen, and case history.
-7. Freeze the version and evaluate on the reserved cases.
-8. Fix priority defects and prepare the report and demonstration.
-
-These are planned milestones, not completed features or validated clinical results.
+The [four-week completion plan](docs/project-plan.md) tracks what is working, what remains from the proposal, and how each milestone will be tested. Start with editable typed prescriptions and the labelled fictional cases, then complete the two assessment pathways, integrate reviewer decisions and run the reserved evaluation.
