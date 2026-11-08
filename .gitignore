@@ -16,6 +16,7 @@
 # next.js
 /.next/
 /out/
+/public/demo/classifier/ort/
 
 # production
 /build

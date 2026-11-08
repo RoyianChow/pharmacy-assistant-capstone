@@ -1,3 +1,4 @@
 # Preserve generated document bytes and PDF cross-reference offsets on Windows.
 *.pdf binary
 *.png binary
+*.onnx binary

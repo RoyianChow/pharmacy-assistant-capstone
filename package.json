@@ -6,9 +6,12 @@
     "node": ">=22.13.0"
   },
   "scripts": {
+    "predev": "node scripts/prepare-classifier-runtime.mjs",
     "dev": "next dev",
+    "predev:prescriptions": "node scripts/prepare-classifier-runtime.mjs",
     "dev:prescriptions": "node scripts/start-prescription-demo.mjs",
     "ocr:serve": "node scripts/start-paddleocr.mjs",
+    "prebuild": "node scripts/prepare-classifier-runtime.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -22,6 +25,7 @@
     "@vercel/functions": "^3.10.2",
     "@vercel/oidc-aws-credentials-provider": "^3.3.17",
     "next": "16.4.2",
+    "onnxruntime-web": "1.31.1",
     "pg": "^8.23.1",
     "react": "19.3.0",
     "react-dom": "19.3.0"
